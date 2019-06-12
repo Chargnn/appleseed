@@ -58,11 +58,9 @@ closure color as_oren_nayar(
 closure color as_sheen(normal N) BUILTIN;
 
 closure color as_glossy(
-    string      distribution,           // "beckmann", "ggx" or "std"
     normal      N,
     vector      T,
     float       roughness,
-    float       highlight_falloff,
     float       anisotropic,
     float       ior
     // keyword arguments:
@@ -75,27 +73,23 @@ closure color as_blinn(
     float       ior) BUILTIN;
 
 closure color as_metal(
-    string      distribution,           // "beckmann", "ggx" or "std"
     normal      N,
     vector      T,
     color       normal_reflectance,
     color       edge_tint,
     float       roughness,
-    float       highlight_falloff,
     float       anisotropic
     // keyword arguments:
     //   float "energy_compensation" = 0
     ) BUILTIN;
 
 closure color as_glass(
-    string      distribution,           // "beckmann", "ggx" or "std"
     normal      N,
     vector      T,
     color       surface_transmittance,
     color       reflection_tint,
     color       refraction_tint,
     float       roughness,
-    float       highlight_falloff,
     float       anisotropic,
     float       ior,
     color       volume_transmittance,
@@ -150,12 +144,10 @@ closure color as_disney(
     float       clearcoat_gloss) BUILTIN;
 
 closure color as_plastic(
-    string      distribution,           // "beckmann", "ggx", "gtr1" or "std"
     normal      N,
     color       specular_color,
     float       specular_weight,
     float       specular_roughness,
-    float       highlight_falloff,
     float       ior,
     color       diffuse_color,
     float       diffuse_weight,
@@ -175,6 +167,11 @@ closure color as_npr_contour(
     float       creases_threshold
     // keyword arguments:
     //   int    "quality" = 1
+) BUILTIN;
+
+closure color as_matte(
+    color       matte_color,
+    float       matte_alpha,
 ) BUILTIN;
 
 #endif  // AS_OSL_EXTENSIONS_H

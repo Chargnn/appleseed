@@ -152,19 +152,20 @@ bool BSDFSampler::sample(
         sample);
 
     // Filter scattering modes.
-    if (!(m_bsdf_sampling_modes & sample.m_mode))
+    if (!(m_bsdf_sampling_modes & sample.get_mode()))
         return false;
 
     incoming = sample.m_incoming;
     value = sample.m_value;
-    pdf = sample.m_probability;
+    pdf = sample.get_probability();
+
     return true;
 }
 
 float BSDFSampler::evaluate(
-    const int                   light_sampling_modes,
     const Vector3f&             outgoing,
     const Vector3f&             incoming,
+    const int                   light_sampling_modes,
     DirectShadingComponents&    value) const
 {
     return
@@ -298,9 +299,9 @@ bool VolumeSampler::sample(
 }
 
 float VolumeSampler::evaluate(
-    const int                   light_sampling_modes,
     const Vector3f&             outgoing,
     const Vector3f&             incoming,
+    const int                   light_sampling_modes,
     DirectShadingComponents&    value) const
 {
     const float pdf =

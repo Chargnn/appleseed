@@ -94,26 +94,15 @@ namespace
             m_blinn_brdf = create_and_register_bsdf(BlinnID, "blinn_brdf");
             m_diffuse_btdf = create_and_register_bsdf(TranslucentID, "diffuse_btdf");
             m_disney_brdf = create_and_register_bsdf(DisneyID, "disney_brdf");
-
-            m_glass_beckmann_bsdf = create_and_register_glass_bsdf(GlassBeckmannID, "beckmann");
-            m_glass_ggx_bsdf = create_and_register_glass_bsdf(GlassGGXID, "ggx");
-            m_glass_std_bsdf = create_and_register_glass_bsdf(GlassSTDID, "std");
-
-            m_glossy_beckmann_brdf = create_and_register_glossy_brdf(GlossyBeckmannID, "beckmann");
-            m_glossy_ggx_brdf = create_and_register_glossy_brdf(GlossyGGXID, "ggx");
-            m_glossy_std_brdf = create_and_register_glossy_brdf(GlossySTDID, "std");
-
-            m_metal_beckmann_brdf = create_and_register_metal_brdf(MetalBeckmannID, "beckmann");
-            m_metal_ggx_brdf = create_and_register_metal_brdf(MetalGGXID, "ggx");
-            m_metal_std_brdf = create_and_register_metal_brdf(MetalSTDID, "std");
-
+            m_glass_bsdf =
+                create_and_register_bsdf(
+                    GlassID,
+                    "glass_bsdf",
+                    ParamArray().insert("volume_parameterization", "transmittance"));
+            m_glossy_brdf = create_and_register_bsdf(GlossyID, "glossy_brdf");
+            m_metal_brdf = create_and_register_bsdf(MetalID, "metal_brdf");
             m_orennayar_brdf = create_and_register_bsdf(OrenNayarID, "orennayar_brdf");
-
-            m_plastic_beckmann_brdf = create_and_register_plastic_brdf(PlasticBeckmannID, "beckmann");
-            m_plastic_ggx_brdf = create_and_register_plastic_brdf(PlasticGGXID, "ggx");
-            m_plastic_gtr1_brdf = create_and_register_plastic_brdf(PlasticGTR1ID, "gtr1");
-            m_plastic_std_brdf = create_and_register_plastic_brdf(PlasticSTDID, "std");
-
+            m_plastic_brdf = create_and_register_bsdf(PlasticID, "plastic_brdf");
             m_sheen_brdf = create_and_register_bsdf(SheenID, "sheen_brdf");
         }
 
@@ -211,14 +200,12 @@ namespace
             sample.m_value *= c->get_closure_weight(closure_index);
             sample.m_aov_components.m_albedo *= c->get_closure_weight(closure_index);
 
-            if (sample.m_mode == ScatteringMode::None ||
-                sample.m_mode == ScatteringMode::Specular ||
-                sample.m_probability < 1e-6f)
-            {
+            if (sample.get_mode() == ScatteringMode::None ||
+                sample.get_mode() == ScatteringMode::Specular ||
+                sample.get_probability() < 1.0e-6f)
                 return;
-            }
 
-            sample.m_probability *= pdfs[closure_index];
+            float probability = sample.get_probability() * pdfs[closure_index];
             pdfs[closure_index] = 0.0f;
 
             // Evaluate the closures we didn't sample.
@@ -228,6 +215,7 @@ namespace
                 {
                     DirectShadingComponents s;
                     const float pdf =
+                        pdfs[i] *
                         bsdf_from_closure_id(c->get_closure_type(i))
                             .evaluate(
                                 c->get_closure_input_values(i),
@@ -238,15 +226,19 @@ namespace
                                 sample.m_outgoing.get_value(),
                                 sample.m_incoming.get_value(),
                                 modes,
-                                s)  * pdfs[i];
+                                s);
 
                     if (pdf > 0.0f)
                     {
                         madd(sample.m_value, s, c->get_closure_weight(i));
-                        sample.m_probability += pdf;
+                        probability += pdf;
                     }
                 }
             }
+
+            if (probability > 1.0e-6f)
+                sample.set_to_scattering(sample.get_mode(), probability);
+            else sample.set_to_absorption();
         }
 
         float evaluate(
@@ -265,14 +257,15 @@ namespace
             float pdfs[CompositeSurfaceClosure::MaxClosureEntries];
             c->compute_pdfs(modes, pdfs);
 
-            float prob = 0.0f;
+            float pdf = 0.0f;
 
             for (size_t i = 0, e = c->get_closure_count(); i < e; ++i)
             {
                 if (pdfs[i] > 0.0f)
                 {
                     DirectShadingComponents s;
-                    const float pdf =
+                    const float closure_pdf =
+                        pdfs[i] *
                         bsdf_from_closure_id(c->get_closure_type(i))
                             .evaluate(
                                 c->get_closure_input_values(i),
@@ -283,17 +276,18 @@ namespace
                                 outgoing,
                                 incoming,
                                 modes,
-                                s) * pdfs[i];
+                                s);
 
-                    if (pdf > 0.0f)
+                    if (closure_pdf > 0.0f)
                     {
                         madd(value, s, c->get_closure_weight(i));
-                        prob += pdf;
+                        pdf += closure_pdf;
                     }
                 }
             }
 
-            return prob;
+            assert(pdf >= 0.0f);
+            return pdf;
         }
 
         float evaluate_pdf(
@@ -310,13 +304,14 @@ namespace
             float pdfs[CompositeSurfaceClosure::MaxClosureEntries];
             c->compute_pdfs(modes, pdfs);
 
-            float prob = 0.0f;
+            float pdf = 0.0f;
 
             for (size_t i = 0, e = c->get_closure_count(); i < e; ++i)
             {
                 if (pdfs[i] > 0.0f)
                 {
-                    prob +=
+                    const float closure_pdf =
+                        pdfs[i] *
                         bsdf_from_closure_id(c->get_closure_type(i))
                             .evaluate_pdf(
                                 c->get_closure_input_values(i),
@@ -325,11 +320,13 @@ namespace
                                 c->get_closure_shading_basis(i),
                                 outgoing,
                                 incoming,
-                                modes) * pdfs[i];
+                                modes);
+                    pdf += closure_pdf;
                 }
             }
 
-            return prob;
+            assert(pdf >= 0.0f);
+            return pdf;
         }
 
         float sample_ior(
@@ -353,7 +350,7 @@ namespace
             for (size_t i = 0, e = c->get_closure_count(); i < e; ++i)
             {
                 const ClosureID cid = c->get_closure_type(i);
-                if (cid > GlassID && cid <= LastGlassClosure)
+                if (cid == GlassID)
                 {
                     const float w = c->get_closure_scalar_weight(i);
                     Spectrum a;
@@ -373,86 +370,20 @@ namespace
         auto_release_ptr<BSDF>      m_blinn_brdf;
         auto_release_ptr<BSDF>      m_diffuse_btdf;
         auto_release_ptr<BSDF>      m_disney_brdf;
-        auto_release_ptr<BSDF>      m_glass_beckmann_bsdf;
-        auto_release_ptr<BSDF>      m_glass_ggx_bsdf;
-        auto_release_ptr<BSDF>      m_glass_std_bsdf;
-        auto_release_ptr<BSDF>      m_glossy_beckmann_brdf;
-        auto_release_ptr<BSDF>      m_glossy_ggx_brdf;
-        auto_release_ptr<BSDF>      m_glossy_std_brdf;
-        auto_release_ptr<BSDF>      m_metal_beckmann_brdf;
-        auto_release_ptr<BSDF>      m_metal_ggx_brdf;
-        auto_release_ptr<BSDF>      m_metal_std_brdf;
+        auto_release_ptr<BSDF>      m_glass_bsdf;
+        auto_release_ptr<BSDF>      m_glossy_brdf;
+        auto_release_ptr<BSDF>      m_metal_brdf;
         auto_release_ptr<BSDF>      m_orennayar_brdf;
-        auto_release_ptr<BSDF>      m_plastic_beckmann_brdf;
-        auto_release_ptr<BSDF>      m_plastic_ggx_brdf;
-        auto_release_ptr<BSDF>      m_plastic_gtr1_brdf;
-        auto_release_ptr<BSDF>      m_plastic_std_brdf;
+        auto_release_ptr<BSDF>      m_plastic_brdf;
         auto_release_ptr<BSDF>      m_sheen_brdf;
 
         auto_release_ptr<BSDF> create_and_register_bsdf(
             const ClosureID         cid,
-            const char*             model)
+            const char*             model,
+            const ParamArray&       params = ParamArray())
         {
             auto_release_ptr<BSDF> bsdf =
-                BSDFFactoryRegistrar().lookup(model)->create(model, ParamArray());
-
-            m_all_bsdfs[cid] = bsdf.get();
-
-            return bsdf;
-        }
-
-        auto_release_ptr<BSDF> create_and_register_glass_bsdf(
-            const ClosureID         cid,
-            const char*             mdf_name)
-        {
-            auto_release_ptr<BSDF> bsdf =
-                GlassBSDFFactory().create(
-                    "glass_bsdf",
-                    ParamArray()
-                        .insert("mdf", mdf_name)
-                        .insert("volume_parameterization", "transmittance"));
-
-            m_all_bsdfs[cid] = bsdf.get();
-
-            return bsdf;
-        }
-
-        auto_release_ptr<BSDF> create_and_register_glossy_brdf(
-            const ClosureID         cid,
-            const char*             mdf_name)
-        {
-            auto_release_ptr<BSDF> bsdf =
-                GlossyBRDFFactory().create(
-                    "glossy_brdf",
-                    ParamArray().insert("mdf", mdf_name));
-
-            m_all_bsdfs[cid] = bsdf.get();
-
-            return bsdf;
-        }
-
-        auto_release_ptr<BSDF> create_and_register_metal_brdf(
-            const ClosureID         cid,
-            const char*             mdf_name)
-        {
-            auto_release_ptr<BSDF> bsdf =
-                MetalBRDFFactory().create(
-                    "metal_brdf",
-                    ParamArray().insert("mdf", mdf_name));
-
-            m_all_bsdfs[cid] = bsdf.get();
-
-            return bsdf;
-        }
-
-        auto_release_ptr<BSDF> create_and_register_plastic_brdf(
-            const ClosureID         cid,
-            const char*             mdf_name)
-        {
-            auto_release_ptr<BSDF> bsdf =
-                PlasticBRDFFactory().create(
-                    "plastic_brdf",
-                    ParamArray().insert("mdf", mdf_name));
+                BSDFFactoryRegistrar().lookup(model)->create(model, params);
 
             m_all_bsdfs[cid] = bsdf.get();
 

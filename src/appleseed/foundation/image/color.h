@@ -66,7 +66,7 @@ class Color
     static const size_t Components = N;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Color() = default;                          // leave all components uninitialized
 #else
     Color() {}                                  // leave all components uninitialized
@@ -194,7 +194,7 @@ class Color<T, 3>
     ValueType r, g, b;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Color() = default;                          // leave all components uninitialized
 #else
     Color() {}                                  // leave all components uninitialized
@@ -259,7 +259,7 @@ class Color<T, 4>
     ValueType r, g, b, a;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Color() = default;                          // leave all components uninitialized
 #else
     Color() {}                                  // leave all components uninitialized
@@ -343,6 +343,12 @@ typedef Color<double,   4> Color4d;
 template <typename T, typename Int>
 Color<T, 3> integer_to_color3(const Int i);
 
+// Compute the square L2 distance between two linear RGB colors.
+template <typename T>
+T square_distance(
+    const Color<T, 3>& c1,
+    const Color<T, 3>& c2);
+
 
 //
 // N-dimensional color implementation.
@@ -400,7 +406,7 @@ template <typename T, size_t N>
 void PoisonImpl<Color<T, N>>::do_poison(Color<T, N>& c)
 {
     for (size_t i = 0; i < N; ++i)
-        poison(c[i]);
+        always_poison(c[i]);
 }
 
 template <typename T, size_t N>
@@ -1181,6 +1187,17 @@ Color<T, 3> integer_to_color3(const Int i)
         static_cast<T>(x) * (1.0f / 4294967295.0f),
         static_cast<T>(y) * (1.0f / 4294967295.0f),
         static_cast<T>(z) * (1.0f / 4294967295.0f));
+}
+
+template <typename T>
+inline T square_distance(
+    const Color<T, 3>& c1,
+    const Color<T, 3>& c2)
+{
+    return
+        square(c1.r - c2.r) +
+        square(c1.g - c2.g) +
+        square(c1.b - c2.b);
 }
 
 }   // namespace foundation

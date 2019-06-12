@@ -80,6 +80,13 @@ class APPLESEED_DLLSYMBOL Image
         const size_t        tile_height,        // tile height, in pixels
         const PixelFormat   pixel_format);
 
+    // Construct an image by converting an existing image to a given pixel format,
+    // and allowing reordering, deletion of channels.
+    Image(
+        const Image&        source,             // source image
+        const PixelFormat   pixel_format,       // new pixel format
+        const size_t*       shuffle_table);     // channel shuffling table
+
     // Destructor.
     ~Image() override;
 
@@ -90,7 +97,8 @@ class APPLESEED_DLLSYMBOL Image
     const CanvasProperties& properties() const override;
 
     // Direct access to a given tile.
-    // Warning: it is not safe to call these methods concurrently from multiple threads.
+    // It is safe to access distinct tiles from multiple threads concurrently
+    // (however it is not safe to access the same tile from multiple threads).
     Tile& tile(
         const size_t        tile_x,
         const size_t        tile_y) override;

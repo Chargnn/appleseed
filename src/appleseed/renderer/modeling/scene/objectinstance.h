@@ -103,7 +103,7 @@ class APPLESEED_DLLSYMBOL ObjectInstance
     bool transform_swaps_handedness() const;
 
     // Return true if the normals of this instance must be flipped.
-    bool flip_normals() const;
+    bool must_flip_normals() const;
 
     // Return or set visibility flags of this instance.
     foundation::uint32 get_vis_flags() const;
@@ -136,8 +136,8 @@ class APPLESEED_DLLSYMBOL ObjectInstance
     // Sides of this object instance's surface.
     enum Side
     {
-        FrontSide = 1 << 0,
-        BackSide  = 1 << 1,
+        FrontSide = 1UL << 0,
+        BackSide  = 1UL << 1,
         BothSides = FrontSide | BackSide
     };
 
@@ -187,8 +187,6 @@ class APPLESEED_DLLSYMBOL ObjectInstance
     // Return true if at least one of the material referenced by this instance has an alpha map set.
     bool uses_alpha_mapping() const;
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
     bool on_frame_begin(
         const Project&              project,
         const BaseGroup*            parent,
@@ -256,7 +254,7 @@ inline bool ObjectInstance::transform_swaps_handedness() const
     return m_transform_swaps_handedness;
 }
 
-inline bool ObjectInstance::flip_normals() const
+inline bool ObjectInstance::must_flip_normals() const
 {
     return m_flip_normals;
 }

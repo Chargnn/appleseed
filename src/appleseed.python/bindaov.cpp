@@ -38,6 +38,9 @@
 #include "foundation/image/image.h"
 #include "foundation/platform/python.h"
 
+// Standard headers.
+#include <string>
+
 namespace bpy = boost::python;
 using namespace foundation;
 using namespace renderer;
@@ -86,10 +89,15 @@ namespace
 
         const char** names = aov->get_channel_names();
 
-        for (size_t i = 0, e = aov->get_channel_count(); i < e ; ++i)
+        for (size_t i = 0, e = aov->get_channel_count(); i < e; ++i)
             channels.append(names[i]);
 
         return channels;
+    }
+
+    Image* get_cryptomatte_image(const AOV* aov)
+    {
+        return static_cast<const CryptomatteAOV*>(aov)->get_cryptomatte_image();
     }
 }
 
@@ -103,7 +111,8 @@ void bind_aov()
         .def("get_channel_count", &AOV::get_channel_count)
         .def("get_channel_names", &get_channel_names)
         .def("has_color_data", &AOV::has_color_data)
-        .def("get_image", &AOV::get_image, bpy::return_value_policy<bpy::reference_existing_object>());
+        .def("get_image", &AOV::get_image, bpy::return_value_policy<bpy::reference_existing_object>())
+        .def("get_cryptomatte_image", &get_cryptomatte_image, bpy::return_value_policy<bpy::reference_existing_object>());
 
     bind_typed_entity_vector<AOV>("AOVContainer");
 

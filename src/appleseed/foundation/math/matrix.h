@@ -57,16 +57,15 @@ namespace foundation
 {
 
 //
+// MxN matrix class (M rows, N columns) of arbitrary type.
+//
+// Matrices are stored in row-major order.
+//
 // References:
 //
 //   http://en.wikipedia.org/wiki/Rotation_matrix
 //
 //   Real-Time Rendering, Second Edition, A. K. Peters
-//
-
-
-//
-// MxN matrix class (M rows, N columns) of arbitrary type.
 //
 
 template <typename T, size_t M, size_t N>
@@ -83,7 +82,7 @@ class Matrix
     static const size_t Components = M * N;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Matrix() = default;                                     // leave all components uninitialized
 #else
     Matrix() {}                                             // leave all components uninitialized
@@ -182,7 +181,7 @@ class Matrix<T, N, N>
     static const size_t Components = N * N;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Matrix() = default;                                     // leave all components uninitialized
 #else
     Matrix() {}                                             // leave all components uninitialized
@@ -254,7 +253,7 @@ class Matrix<T, 3, 3>
     static const size_t Components = 3 * 3;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Matrix() = default;                                     // leave all components uninitialized
 #else
     Matrix() {}                                             // leave all components uninitialized
@@ -379,7 +378,7 @@ class Matrix<T, 4, 4>
     static const size_t Components = 4 * 4;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Matrix() = default;                                     // leave all components uninitialized
 #else
     Matrix() {}                                             // leave all components uninitialized
@@ -453,6 +452,18 @@ class Matrix<T, 4, 4>
         const Vector<T, 3>&     origin,                     // camera origin
         const Vector<T, 3>&     target,                     // target point
         const Vector<T, 3>&     up);                        // up vector, unit-length
+
+    // Build a matrix that maps a frustum defined by the
+    // top, botom, left, and right points on the near plane and
+    // extending from z_near to z_far in the +Z axis to the axis aligned
+    // cube in the area (-1, -1, -1) to (1, 1, 1).
+    static MatrixType make_frustum(
+        const ValueType bottom,
+        const ValueType top,
+        const ValueType left,
+        const ValueType right,
+        const ValueType z_near,
+        const ValueType z_far);
 
     // Unchecked array subscripting.
     ValueType& operator[](const size_t i);
@@ -567,7 +578,7 @@ template <typename T, size_t M, size_t N>
 void PoisonImpl<Matrix<T, M, N>>::do_poison(Matrix<T, M, N>& m)
 {
     for (size_t i = 0; i < m.Components; ++i)
-        poison(m[i]);
+        always_poison(m[i]);
 }
 
 template <typename T, size_t M, size_t N>
@@ -1452,8 +1463,8 @@ inline Quaternion<T> Matrix<T, 3, 3>::extract_unit_quaternion() const
 
         // Fast modulo 3.
         // See http://www.codercorner.com/Modulo3.htm.
-        const size_t j = (1 << i) & 3;
-        const size_t k = (1 << j) & 3;
+        const size_t j = (1UL << i) & 3;
+        const size_t k = (1UL << j) & 3;
 
         ValueType root =
             std::sqrt(m_comp[i*3+i] - m_comp[j*3+j] - m_comp[k*3+k] + ValueType(1.0));
@@ -2007,6 +2018,49 @@ inline Matrix<T, 4, 4> Matrix<T, 4, 4>::make_lookat(
     mat[13] = T(0.0);
     mat[14] = T(0.0);
     mat[15] = T(1.0);
+
+    return mat;
+}
+
+template <typename T>
+Matrix<T, 4, 4> Matrix<T, 4, 4>::make_frustum(
+    const ValueType bottom,
+    const ValueType top,
+    const ValueType left,
+    const ValueType right,
+    const ValueType z_near,
+    const ValueType z_far)
+{
+    assert(left   != right);
+    assert(top    != bottom);
+    assert(z_near != z_far);
+
+    const T a = (right + left) / (right - left);
+    const T b = (top + bottom) / (top - bottom);
+    const T c = -(z_far + z_near) / (z_far - z_near);
+    const T d = T(-2.0) * (z_far * z_near) / (z_far - z_near);
+
+    MatrixType mat;
+
+    mat[ 0] = T(2.0) * z_near / (right - left);
+    mat[ 1] = T(0.0);
+    mat[ 2] = a;
+    mat[ 3] = T(0.0);
+
+    mat[ 4] = T(0.0);
+    mat[ 5] = T(2.0) * z_near / (top - bottom);
+    mat[ 6] = b;
+    mat[ 7] = T(0.0);
+
+    mat[ 8] = T(0.0);
+    mat[ 9] = T(0.0);
+    mat[10] = c;
+    mat[11] = d;
+
+    mat[12] = T(0.0);
+    mat[13] = T(0.0);
+    mat[14] = T(-1.0);
+    mat[15] = T(0.0);
 
     return mat;
 }

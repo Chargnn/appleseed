@@ -76,9 +76,11 @@ namespace studio {
 RenderTab::RenderTab(
     ProjectExplorer&        project_explorer,
     Project&                project,
+    RenderingManager&       rendering_manager,
     OCIO::ConstConfigRcPtr  ocio_config)
   : m_project_explorer(project_explorer)
   , m_project(project)
+  , m_rendering_manager(rendering_manager)
   , m_ocio_config(ocio_config)
 {
     setObjectName("render_widget_tab");
@@ -223,23 +225,23 @@ void RenderTab::create_toolbar()
     m_toolbar->setObjectName("render_toolbar");
     m_toolbar->setIconSize(QSize(18, 18));
 
-    // Save All AOVs button.
+    // Save Frame and AOVs button.
     QToolButton* save_aovs_button = new QToolButton();
     save_aovs_button->setIcon(load_icons("rendertab_save_all_aovs"));
-    save_aovs_button->setToolTip("Save Raw Frame and AOVs...");
+    save_aovs_button->setToolTip("Save Frame and AOVs...");
     connect(
         save_aovs_button, SIGNAL(clicked()),
-        SIGNAL(signal_save_raw_frame_and_aovs()));
+        SIGNAL(signal_save_frame_and_aovs()));
     m_toolbar->addWidget(save_aovs_button);
 
-    // Quicksave All AOVs button.
-    QToolButton* quick_save_aovs_button = new QToolButton();
-    quick_save_aovs_button->setIcon(load_icons("rendertab_quicksave_all_aovs"));
-    quick_save_aovs_button->setToolTip("Quicksave Raw Frame and AOVs");
+    // Quicksave Frame and AOVs button.
+    QToolButton* quicksave_aovs_button = new QToolButton();
+    quicksave_aovs_button->setIcon(load_icons("rendertab_quicksave_all_aovs"));
+    quicksave_aovs_button->setToolTip("Quicksave Frame and AOVs");
     connect(
-        quick_save_aovs_button, SIGNAL(clicked()),
-        SIGNAL(signal_quicksave_raw_frame_and_aovs()));
-    m_toolbar->addWidget(quick_save_aovs_button);
+        quicksave_aovs_button, SIGNAL(clicked()),
+        SIGNAL(signal_quicksave_frame_and_aovs()));
+    m_toolbar->addWidget(quicksave_aovs_button);
 
     m_toolbar->addSeparator();
 
@@ -486,6 +488,22 @@ void RenderTab::recreate_handlers()
     m_pixel_inspector_handler->set_enabled(false);
     m_camera_controller->set_enabled(false);
     m_scene_picking_handler->set_enabled(true);     // todo: should be true by default
+
+    // Material drop handler.
+    m_material_drop_handler.reset(
+        new MaterialDropHandler(
+            m_project,
+            m_rendering_manager));
+
+    connect(
+        m_render_widget,
+        SIGNAL(signal_material_dropped(
+            const foundation::Vector2d&,
+            const QString&)),
+        m_material_drop_handler.get(),
+        SLOT(slot_material_dropped(
+            const foundation::Vector2d&,
+            const QString&)));
 }
 
 }   // namespace studio

@@ -49,6 +49,7 @@
 // Forward declarations.
 namespace appleseed { namespace studio { class AttributeEditor; } }
 namespace appleseed { namespace studio { class ItemBase; } }
+namespace appleseed { namespace studio { class ProjectManager; } }
 namespace appleseed { namespace studio { class RenderingManager; } }
 namespace renderer  { class ParamArray; }
 namespace renderer  { class Project; }
@@ -72,6 +73,7 @@ class ProjectExplorer
         QTreeWidget*            tree_widget,
         AttributeEditor*        attribute_editor,
         renderer::Project&      project,
+        ProjectManager&         project_manager,
         RenderingManager&       rendering_manager,
         renderer::ParamArray&   settings);
 
@@ -101,6 +103,7 @@ class ProjectExplorer
     void slot_context_menu(const QPoint& point);
     void slot_item_selection_changed();
     void slot_edit_item(QTreeWidgetItem* item, int column);
+    void slot_drag_item(QTreeWidgetItem* item, int column);
     void slot_delete_items();
 };
 

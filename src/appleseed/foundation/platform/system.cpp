@@ -31,6 +31,10 @@
 #include "system.h"
 
 // appleseed.foundation headers.
+#ifdef APPLESEED_WITH_GPU
+#include "foundation/cuda/cudadevice.h"
+#include "foundation/cuda/exception.h"
+#endif
 #include "foundation/platform/arch.h"
 #include "foundation/platform/defaulttimers.h"
 #include "foundation/platform/thread.h"
@@ -92,6 +96,13 @@
 #else
 
     #error Unsupported platform.
+
+#endif
+
+#ifdef APPLESEED_WITH_GPU
+
+    #include <cuda.h>
+    #include <optix.h>
 
 #endif
 
@@ -537,7 +548,7 @@ namespace
             "=d" (regs[edx]));
     }
 
-#define BIT(n)              (1ul << (n))
+#define BIT(n)              (1UL << (n))
 #define BITMASK(h, l)       ((BIT(h) | (BIT(h) - 1)) & ~(BIT(l) - 1))
 #define BITFIELD(x, h, l)   (((x) & BITMASK(h, l)) >> l)
 
@@ -889,6 +900,74 @@ uint64 System::get_peak_process_virtual_memory_size()
 // Common code.
 // ------------------------------------------------------------------------------------------------
 
+#ifdef APPLESEED_WITH_GPU
+
+namespace
+{
+    void print_gpu_information(Logger& logger)
+    {
+        try
+        {
+            const CUDADeviceList& dev_list = CUDADeviceList::instance();
+            if (dev_list.empty())
+            {
+                LOG_INFO(logger, "no GPU device found.\n");
+                return;
+            }
+
+            LOG_INFO(logger, "GPU information:");
+
+            // Devices.
+            LOG_INFO(logger, "  device count                  " FMT_SIZE_T, dev_list.size());
+            for (size_t i = 0, e = dev_list.size(); i < e; ++i)
+            {
+                const CUDADevice& dev = dev_list.get_device(i);
+
+                LOG_INFO(
+                    logger,
+                    "    device #" FMT_SIZE_T ":\n"
+                    "      name                      %s\n"
+                    "      compute capability        %d.%d\n"
+                    "      memory                    %s",
+                    i,
+                    dev.m_name.c_str(),
+                    dev.m_compute_capability_major,
+                    dev.m_compute_capability_minor,
+                    pretty_size(dev.m_total_mem).c_str());
+            }
+
+            // Driver version.
+            int cuda_version;
+            check_cuda_result(cuDriverGetVersion(&cuda_version));
+            const int major_cuda_version = cuda_version / 1000;
+            const int minor_cuda_version = (cuda_version % 1000) / 10;
+            LOG_INFO(logger, "  CUDA version                  %d.%d", major_cuda_version, minor_cuda_version);
+
+            // OptiX version.
+            unsigned int optix_version;
+            if (rtGetVersion(&optix_version) == RT_SUCCESS)
+            {
+                const unsigned int major_optix_version = optix_version / 10000;
+                const unsigned int minor_optix_version = (optix_version % 10000) / 100;
+                const unsigned int micro_optix_version = optix_version % 100;
+                LOG_INFO(
+                    logger,
+                    "  OptiX version                 %u.%u.%u",
+                    major_optix_version,
+                    minor_optix_version,
+                    micro_optix_version);
+            }
+        }
+        catch (const ExceptionCUDAError& e)
+        {
+            LOG_ERROR(logger, "%s", e.what());
+            return;
+        }
+    }
+}
+
+#endif
+
 void System::print_information(Logger& logger)
 {
 #ifdef APPLESEED_X86
@@ -916,6 +995,7 @@ void System::print_information(Logger& logger)
     const string isa = "base instruction set";
 #endif
 
+    // Can't use LOG_INFO() here because of the #ifdefs.
     logger.write(
         LogMessage::Info,
         __FILE__,
@@ -952,6 +1032,10 @@ void System::print_information(Logger& logger)
         pretty_size(get_total_virtual_memory_size()).c_str(),
         pretty_uint(DefaultWallclockTimer().frequency()).c_str(),
         pretty_uint(DefaultProcessorTimer().frequency()).c_str());
+
+#ifdef APPLESEED_WITH_GPU
+    print_gpu_information(logger);
+#endif
 }
 
 const char* System::get_cpu_architecture()
@@ -960,13 +1044,13 @@ const char* System::get_cpu_architecture()
     #ifdef APPLESEED_X86
         return "x86 32-bit";
     #else
-        return "unknown 32-bit"
+        return "unknown 32-bit";
     #endif
 #else
     #ifdef APPLESEED_X86
         return "x86 64-bit";
     #else
-        return "unknown 64-bit"
+        return "unknown 64-bit";
     #endif
 #endif
 }
@@ -995,8 +1079,8 @@ namespace
         uint32 cpuinfo[4];
         cpuid(cpuinfo, 1);
 
-        const bool os_uses_xsave_xrstor = (cpuinfo[2] & (1 << 27)) != 0;
-        const bool cpu_avx_support = (cpuinfo[2] & (1 << 28)) != 0;
+        const bool os_uses_xsave_xrstor = (cpuinfo[2] & (1UL << 27)) != 0;
+        const bool cpu_avx_support = (cpuinfo[2] & (1UL << 28)) != 0;
 
         if (os_uses_xsave_xrstor && cpu_avx_support)
         {

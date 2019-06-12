@@ -35,6 +35,7 @@
 #include "foundation/platform/system.h"
 #include "foundation/utility/containers/dictionary.h"
 #include "foundation/utility/log.h"
+#include "foundation/utility/searchpaths.h"
 #include "foundation/utility/settings.h"
 #include "foundation/utility/string.h"
 
@@ -144,15 +145,11 @@ namespace
         while (path.has_parent_path() && path.filename() != "bin")
             path = path.parent_path();
 
-        if (path.has_root_path())
-        {
-            root_path = path.parent_path();
-            return true;
-        }
-        else
-        {
+        if (!path.has_root_path())
             return false;
-        }
+
+        root_path = path.parent_path();
+        return true;
     }
 
     void copy_directory_path_to_buffer(const bf::path& path, char* output)
@@ -164,55 +161,49 @@ namespace
         strcpy(output, path_string.c_str());
         output[path_string.size()] = '\0';
     }
+
+    const char* nullptr_if_empty(const char* buffer)
+    {
+        return buffer[0] != '\0' ? buffer : nullptr;
+    }
 }
 
 const char* Application::get_root_path()
 {
-    static char root_path_buffer[FOUNDATION_MAX_PATH_LENGTH + 1];
-    static bool root_path_initialized = false;
+    static char buffer[FOUNDATION_MAX_PATH_LENGTH + 1] = { 0 };
+    static bool buffer_initialized = false;
 
-    if (!root_path_initialized)
+    if (!buffer_initialized)
     {
         bf::path root_path;
-
         if (compute_root_path(root_path))
-        {
-            copy_directory_path_to_buffer(root_path, root_path_buffer);
-        }
-        else
-        {
-            root_path_buffer[0] = '\0';
-        }
+            copy_directory_path_to_buffer(root_path, buffer);
 
-        root_path_initialized = true;
+        buffer_initialized = true;
     }
 
-    return root_path_buffer;
+    return nullptr_if_empty(buffer);
 }
 
 const char* Application::get_user_settings_path()
 {
-    static char user_settings_buffer[FOUNDATION_MAX_PATH_LENGTH + 1];
-    static bool user_settings_initialized = false;
+    static char buffer[FOUNDATION_MAX_PATH_LENGTH + 1] = { 0 };
+    static bool buffer_initialized = false;
 
-    if (!user_settings_initialized)
+    if (!buffer_initialized)
     {
 // Windows.
 #if defined _WIN32
 
-        return 0;
-
 // macOS.
 #elif defined __APPLE__
-
-        return 0;
 
 // Other Unices.
 #elif defined __linux__ || defined __FreeBSD__
 
         bf::path p(get_home_directory());
         p /= ".appleseed/settings";
-        copy_directory_path_to_buffer(p, user_settings_buffer);
+        copy_directory_path_to_buffer(p, buffer);
 
 // Other platforms.
 #else
@@ -220,35 +211,51 @@ const char* Application::get_user_settings_path()
         #error Unsupported platform.
 
 #endif
-        user_settings_initialized = true;
+
+        buffer_initialized = true;
     }
 
-    return user_settings_buffer;
+    return nullptr_if_empty(buffer);
 }
 
 const char* Application::get_tests_root_path()
 {
-    static char tests_root_path_buffer[FOUNDATION_MAX_PATH_LENGTH + 1];
-    static bool tests_root_path_initialized = false;
+    static char buffer[FOUNDATION_MAX_PATH_LENGTH + 1] = { 0 };
+    static bool buffer_initialized = false;
 
-    if (!tests_root_path_initialized)
+    if (!buffer_initialized)
     {
         bf::path root_path;
-
         if (compute_root_path(root_path))
         {
-            root_path = root_path / bf::path("tests");
-            copy_directory_path_to_buffer(root_path, tests_root_path_buffer);
-        }
-        else
-        {
-            tests_root_path_buffer[0] = '\0';
+            root_path = root_path / "tests";
+            copy_directory_path_to_buffer(root_path, buffer);
         }
 
-        tests_root_path_initialized = true;
+        buffer_initialized = true;
     }
 
-    return tests_root_path_buffer;
+    return nullptr_if_empty(buffer);
+}
+
+const char* Application::get_unit_tests_output_path()
+{
+    static char buffer[FOUNDATION_MAX_PATH_LENGTH + 1] = { 0 };
+    static bool buffer_initialized = false;
+
+    if (!buffer_initialized)
+    {
+        bf::path root_path;
+        if (compute_root_path(root_path))
+        {
+            root_path = root_path / "tests" / "unit tests" / "outputs";
+            copy_directory_path_to_buffer(root_path, buffer);
+        }
+
+        buffer_initialized = true;
+    }
+
+    return nullptr_if_empty(buffer);
 }
 
 bool Application::load_settings(
@@ -262,10 +269,10 @@ bool Application::load_settings(
 
     SettingsFileReader reader(logger);
 
-    // First try to read the settings from the user path.
+    // First try to read settings from the user path.
     if (const char* user_path = get_user_settings_path())
     {
-        const bf::path user_settings_file_path = bf::path(user_path) / filename;
+        const bf::path user_settings_file_path = safe_canonical(bf::path(user_path) / filename);
         if (bf::exists(user_settings_file_path) &&
             reader.read(
                 user_settings_file_path.string().c_str(),
@@ -277,18 +284,70 @@ bool Application::load_settings(
         }
     }
 
-    // As a fallback, try to read the settings from the appleseed installation directory.
-    const bf::path settings_file_path = root_path / "settings" / filename;
+    // As a fallback, try to read settings from appleseed's installation directory.
+    const string settings_file_path = safe_canonical(root_path / "settings" / filename).string();
     if (reader.read(
-            settings_file_path.string().c_str(),
+            settings_file_path.c_str(),
             schema_file_path.string().c_str(),
             settings))
     {
-        LOG(logger, category, "successfully loaded settings from %s.", settings_file_path.string().c_str());
+        LOG(logger, category, "successfully loaded settings from %s.", settings_file_path.c_str());
         return true;
     }
 
+    LOG(logger, LogMessage::Error, "failed to load settings from %s.", settings_file_path.c_str());
     return false;
+}
+
+bool Application::save_settings(
+    const char*                 filename,
+    const Dictionary&           settings,
+    Logger&                     logger,
+    const LogMessage::Category  category)
+{
+    SettingsFileWriter writer;
+
+    // First try to write settings to the user path.
+    if (const char* user_path = get_user_settings_path())
+    {
+        try
+        {
+            const bf::path user_settings_path(user_path);
+            bf::create_directories(user_settings_path);
+
+            const string user_settings_file_path = safe_canonical(user_settings_path / filename).string();
+            if (writer.write(user_settings_file_path.c_str(), settings))
+            {
+                LOG(logger, category, "successfully saved settings to %s.", user_settings_file_path.c_str());
+                return true;
+            }
+        }
+        catch (const bf::filesystem_error&)
+        {
+        }
+    }
+
+    // As a fallback, try to write settings to appleseed's installation directory.
+    const bf::path root_path(get_root_path());
+    const string settings_file_path = safe_canonical(root_path / "settings" / filename).string();
+    if (writer.write(settings_file_path.c_str(), settings))
+    {
+        LOG(logger, category, "successfully saved settings to %s.", settings_file_path.c_str());
+        return true;
+    }
+
+    LOG(logger, LogMessage::Error, "failed to save settings to %s.", settings_file_path.c_str());
+    return false;
+}
+
+void Application::initialize_resource_search_paths(SearchPaths& search_paths)
+{
+    search_paths.clear_explicit_paths();
+
+    const bf::path root_path = Application::get_root_path();
+
+    // OSL headers.
+    search_paths.push_back_explicit_path((root_path / "shaders").string());
 }
 
 }   // namespace shared

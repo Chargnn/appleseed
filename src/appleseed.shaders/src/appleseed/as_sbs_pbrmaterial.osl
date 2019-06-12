@@ -5,7 +5,7 @@
 //
 // This software is released under the MIT license.
 //
-// Copyright (c) 2018 Luis Barrancos, The appleseedhq Organization
+// Copyright (c) 2018-2019 Luis Barrancos, The appleseedhq Organization
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -275,13 +275,13 @@ shader as_sbs_pbrmaterial
         string page = "Matte Opacity",
         int gafferNoduleLayoutVisible = 0
     ]],
-    int in_maximum_ray_depth = 4
+    int in_maximum_ray_depth = 100
     [[
         string as_maya_attribute_name = "maximumRayDepth",
         string as_maya_attribute_short_name = "mr",
         int min = 0,
         int max = 100,
-        int softmax = 8,
+        int softmax = 16,
         string widget = "slider",
         int slidermin = 0,
         int slidermax = 10,
@@ -343,7 +343,20 @@ shader as_sbs_pbrmaterial
         out_outColor += out_outTransparency;
     }
 
-    if (raytype("shadow") || raytype("transparency"))
+    if (raytype("transparency"))
+    {
+        if (in_enable_matte)
+        {
+            out_outMatteOpacity = as_matte(
+                in_matte_opacity_color,
+                in_matte_opacity);
+
+            out_outColor += out_outMatteOpacity;
+        }
+        return;
+    }
+
+    if (raytype("shadow"))
     {
         return;
     }
@@ -354,14 +367,6 @@ shader as_sbs_pbrmaterial
     if (!status || ray_depth > in_maximum_ray_depth)
     {
         return;
-    }
-
-    if (in_enable_matte)
-    {
-        out_outMatteOpacity = in_matte_opacity *
-            in_matte_opacity_color * holdout();
-
-        out_outColor += out_outMatteOpacity;
     }
 
     if (in_opacity == 0.0)
@@ -387,14 +392,12 @@ shader as_sbs_pbrmaterial
     if (in_refraction > 0.0)
     {
         bsdf += in_refraction * in_opacity * as_glass(
-            "ggx",
             Nn,
             vector(0),  // tangent
             color(1),   // surface transmittance
             color(0),   // reflection tint
             diffuse_color,
             0.01,       // roughness
-            0.0,        // highlight falloff
             0.0,        // anisotropic amount
             in_refractionIOR,
             in_absorptionColor,
@@ -440,11 +443,9 @@ shader as_sbs_pbrmaterial
             float eta = (sqrt_f0 + 1.0) / max(1.0e-6, 1.0 - sqrt_f0);
 
             bsdf += in_opacity * as_glossy(
-                "ggx",
                 Nn,
                 tangent,
                 max(0.01, in_roughness),
-                0.0,
                 in_anisotropyLevel,
                 eta,
                 // disable fresnel weight to scale by F above
@@ -457,13 +458,11 @@ shader as_sbs_pbrmaterial
         {
             bsdf *= 1.0 - metallicness;
             bsdf += in_opacity * metallicness * as_metal(
-                "ggx",
                 Nn,
                 tangent,
                 in_baseColor,
                 color(1.0), // edge tint
                 max(0.01, in_roughness),
-                0.0,        // highlight falloff
                 in_anisotropyLevel,
                 "energy_compensation", 0.0);
         }

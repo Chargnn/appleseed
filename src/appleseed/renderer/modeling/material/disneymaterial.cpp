@@ -46,10 +46,6 @@
 #include "foundation/utility/seexpr.h"
 #include "foundation/utility/tls.h"
 
-// Boost headers.
-#include "boost/algorithm/string.hpp"
-#include "boost/algorithm/string/split.hpp"
-
 // Standard headers.
 #include <algorithm>
 #include <exception>
@@ -59,7 +55,6 @@
 #include <vector>
 
 using namespace foundation;
-using namespace boost;
 using namespace std;
 
 namespace renderer
@@ -619,6 +614,7 @@ DisneyMaterial::DisneyMaterial(
   : Material(name, params)
   , impl(new Impl(this))
 {
+    m_inputs.declare("edf", InputFormatEntity, "");
     m_inputs.declare("alpha_map", InputFormatFloat, "");
     m_inputs.declare("displacement_map", InputFormatSpectralReflectance, "");
 }
@@ -689,7 +685,16 @@ bool DisneyMaterial::on_frame_begin(
     const OnFrameBeginMessageContext context("material", this);
 
     m_render_data.m_bsdf = impl->m_brdf.get();
+    m_render_data.m_edf = get_uncached_edf();
     m_render_data.m_basis_modifier = create_basis_modifier(context);
+
+    if (m_render_data.m_edf && m_render_data.m_alpha_map)
+    {
+        RENDERER_LOG_WARNING(
+            "%smaterial is emitting light but may be partially or entirely transparent; "
+            "this may lead to unexpected or unphysical results.",
+            context.get());
+    }
 
     return prepare_layers(context);
 }
@@ -785,7 +790,7 @@ bool DisneyMaterial::prepare_layers(const MessageContext& context)
     }
     catch (const std::exception& e)     // namespace qualification required
     {
-        RENDERER_LOG_ERROR("%s: %s.", context.get(), e.what());
+        RENDERER_LOG_ERROR("%s%s.", context.get(), e.what());
         return false;
     }
 

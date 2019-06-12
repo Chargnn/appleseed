@@ -109,8 +109,8 @@ class Node
 template <typename T>
 inline void Node<T>::make_interior()
 {
-    if ((m_info & 0x00000003UL) == 0x00000003UL)
-        m_info &= 0xFFFFFFFCUL;
+    if ((m_info & 0x00000003u) == 0x00000003u)
+        m_info &= 0xFFFFFFFCu;
 }
 
 #if __GNUC__ >= 7
@@ -121,7 +121,7 @@ inline void Node<T>::make_interior()
     template <typename T>
     inline void Node<T>::make_leaf()
     {
-        m_info |= 0x00000003UL;
+        m_info |= 0x00000003u;
     }
 
 #if __GNUC__ >= 7
@@ -131,72 +131,78 @@ inline void Node<T>::make_interior()
 template <typename T>
 inline bool Node<T>::is_interior() const
 {
-    return (m_info & 0x00000003UL) != 0x00000003UL;
+    return (m_info & 0x00000003u) != 0x00000003u;
 }
 
 template <typename T>
 inline bool Node<T>::is_leaf() const
 {
-    return (m_info & 0x00000003UL) == 0x00000003UL;
+    return (m_info & 0x00000003u) == 0x00000003u;
 }
 
 template <typename T>
 inline void Node<T>::set_solid_bit(const bool solid)
 {
     if (solid)
-         m_info |= 0x80000000UL;
-    else m_info &= 0x7FFFFFFFUL;
+         m_info |= 0x80000000u;
+    else m_info &= 0x7FFFFFFFu;
 }
 
 template <typename T>
 inline bool Node<T>::is_empty() const
 {
-    return (m_info & 0x80000000UL) == 0;
+    return (m_info & 0x80000000u) == 0;
 }
 
 template <typename T>
 inline bool Node<T>::is_solid() const
 {
-    return (m_info & 0x80000000UL) != 0;
+    return (m_info & 0x80000000u) != 0;
 }
 
 template <typename T>
 inline void Node<T>::set_child_node_index(const size_t index)
 {
+    assert(is_interior());
     assert(index < (1UL << 29));
-    m_info &= 0x80000003UL;
+    m_info &= 0x80000003u;
     m_info |= static_cast<uint32>(index) << 2;
 }
 
 template <typename T>
 inline size_t Node<T>::get_child_node_index() const
 {
-    return static_cast<size_t>((m_info & 0x7FFFFFFCUL) >> 2);
+    assert(is_interior());
+    return static_cast<size_t>((m_info & 0x7FFFFFFCu) >> 2);
 }
 
 template <typename T>
 inline void Node<T>::set_split_dim(const size_t dim)
 {
+    assert(is_interior());
     assert(dim < 4);
-    m_info &= 0xFFFFFFFCUL;
+    m_info &= 0xFFFFFFFCu;
     m_info |= static_cast<uint32>(dim);
 }
 
 template <typename T>
 inline size_t Node<T>::get_split_dim() const
 {
-    return static_cast<size_t>(m_info & 0x00000003UL);
+    assert(is_interior());
+    return static_cast<size_t>(m_info & 0x00000003u);
 }
 
 template <typename T>
 inline void Node<T>::set_split_abs(const ValueType abscissa)
 {
+    assert(is_interior());
     m_abscissa = abscissa;
 }
 
 template <typename T>
 inline T Node<T>::get_split_abs() const
 {
+    assert(is_interior());
     return m_abscissa;
 }
 

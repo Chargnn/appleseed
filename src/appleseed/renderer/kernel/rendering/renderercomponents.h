@@ -48,16 +48,19 @@
 #include <memory>
 
 // Forward declarations.
-namespace renderer  { class Frame; }
-namespace renderer  { class IFrameRenderer; }
-namespace renderer  { class ITileCallbackFactory; }
-namespace renderer  { class OIIOTextureSystem; }
-namespace renderer  { class OSLShadingSystem; }
-namespace renderer  { class ParamArray; }
-namespace renderer  { class Project; }
-namespace renderer  { class Scene; }
-namespace renderer  { class TextureStore; }
-namespace renderer  { class TraceContext; }
+namespace foundation    { class IAbortSwitch; }
+namespace renderer      { class Frame; }
+namespace renderer      { class IFrameRenderer; }
+namespace renderer      { class ITileCallbackFactory; }
+namespace renderer      { class OIIOTextureSystem; }
+namespace renderer      { class OnFrameBeginRecorder; }
+namespace renderer      { class OnRenderBeginRecorder; }
+namespace renderer      { class OSLShadingSystem; }
+namespace renderer      { class ParamArray; }
+namespace renderer      { class Project; }
+namespace renderer      { class Scene; }
+namespace renderer      { class TextureStore; }
+namespace renderer      { class TraceContext; }
 
 namespace renderer
 {
@@ -70,21 +73,40 @@ namespace renderer
 class RendererComponents
 {
   public:
+    // Constructor.
     RendererComponents(
-        const Project&          project,
-        const ParamArray&       params,
-        ITileCallbackFactory*   tile_callback_factory,
-        TextureStore&           texture_store,
-        OIIOTextureSystem&      texture_system,
-        OSLShadingSystem&       shading_system);
+        const Project&              project,
+        const ParamArray&           params,
+        ITileCallbackFactory*       tile_callback_factory,
+        TextureStore&               texture_store,
+        OIIOTextureSystem&          texture_system,
+        OSLShadingSystem&           shading_system);
 
+    // Create all components as specified by the parameters passed at construction.
     bool create();
 
+    // Ask every component to print its settings.
     void print_settings() const;
 
-    ShadingEngine& get_shading_engine();
+    // Please refer to the documentation of Entity::on_render_begin().
+    bool on_render_begin(
+        OnRenderBeginRecorder&      recorder,
+        foundation::IAbortSwitch*   abort_switch = nullptr);
 
-    IFrameRenderer& get_frame_renderer();
+    // Please refer to the documentation of Entity::on_frame_begin().
+    bool on_frame_begin(
+        OnFrameBeginRecorder&       recorder,
+        foundation::IAbortSwitch*   abort_switch = nullptr);
+
+    // Retrieve individual components.
+    const TraceContext& get_trace_context() const;
+    BackwardLightSampler* get_backward_light_sampler() const;
+    ShadingEngine& get_shading_engine();
+    TextureStore& get_texture_store() const;
+    OIIOTextureSystem& get_oiio_texture_system();
+    OSLShadingSystem& get_osl_shading_system();
+    IShadingResultFrameBufferFactory& get_shading_result_framebuffer_factory() const;
+    IFrameRenderer& get_frame_renderer() const;
 
   private:
     const Project&                                      m_project;
@@ -97,8 +119,8 @@ class RendererComponents
     std::unique_ptr<BackwardLightSampler>               m_backward_light_sampler;
     ShadingEngine                                       m_shading_engine;
     TextureStore&                                       m_texture_store;
-    OIIOTextureSystem&                                  m_texture_system;
-    OSLShadingSystem&                                   m_shading_system;
+    OIIOTextureSystem&                                  m_oiio_texture_system;
+    OSLShadingSystem&                                   m_osl_shading_system;
 
     std::unique_ptr<ILightingEngineFactory>             m_lighting_engine_factory;
     std::unique_ptr<ISampleRendererFactory>             m_sample_renderer_factory;
@@ -123,14 +145,44 @@ class RendererComponents
 // RendererComponents class implementation.
 //
 
+inline const TraceContext& RendererComponents::get_trace_context() const
+{
+    return m_trace_context;
+}
+
+inline BackwardLightSampler* RendererComponents::get_backward_light_sampler() const
+{
+    return m_backward_light_sampler.get();
+}
+
 inline ShadingEngine& RendererComponents::get_shading_engine()
 {
     return m_shading_engine;
 }
 
-inline IFrameRenderer& RendererComponents::get_frame_renderer()
+inline TextureStore& RendererComponents::get_texture_store() const
+{
+    return m_texture_store;
+}
+
+inline OIIOTextureSystem& RendererComponents::get_oiio_texture_system()
+{
+    return m_oiio_texture_system;
+}
+
+inline OSLShadingSystem& RendererComponents::get_osl_shading_system()
+{
+    return m_osl_shading_system;
+}
+
+inline IFrameRenderer& RendererComponents::get_frame_renderer() const
 {
     return *m_frame_renderer.get();
 }
 
-}   // namespace renderer
+inline IShadingResultFrameBufferFactory& RendererComponents::get_shading_result_framebuffer_factory() const
+{
+    return *m_shading_result_framebuffer_factory.get();
+}
+
+}       // namespace renderer

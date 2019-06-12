@@ -50,6 +50,7 @@
 
 // Qt headers.
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QIcon>
@@ -79,8 +80,6 @@ using namespace std;
 
 namespace appleseed {
 namespace studio {
-
-const QString g_appleseed_image_files_filter = "Bitmap Files (*.exr *.png);;OpenEXR (*.exr);;PNG (*.png);;All Files (*.*)";
 
 const QString g_qt_image_files_filter = "Bitmap Files (*.bmp *.jpg *.png *.tif);;BMP (*.bmp);;JPEG (*.jpg);;PNG (*.png);;TIFF (*.tif);;All Files (*.*)";
 
@@ -198,6 +197,16 @@ bool file_exists(const QString& path)
     return info.exists() && info.isFile();
 }
 
+QByteArray load_gl_shader(const QString& base_name)
+{
+    const QString resource_path(QString(":/shaders/%1").arg(base_name));
+
+    QFile file(resource_path);
+    file.open(QFile::ReadOnly);
+
+    return file.readAll();
+}
+
 QIcon load_icons(const QString& base_name)
 {
     const QString base_icon_filepath(make_app_path("icons/%1.png").arg(base_name));
@@ -219,12 +228,12 @@ namespace
 {
     QString get_value(const ParamArray& settings, const QString& key)
     {
-        return settings.get_path_optional<QString>(key.toAscii().constData());
+        return settings.get_path_optional<QString>(key.toUtf8().constData());
     }
 
     void set_value(ParamArray& settings, const QString& key, const QString& value)
     {
-        settings.insert_path(key.toAscii().constData(), value);
+        settings.insert_path(key.toUtf8().constData(), value);
     }
 }
 
@@ -363,11 +372,11 @@ void set_minimum_width(QMessageBox& msgbox, const int minimum_width)
         layout->columnCount());     // column span
 }
 
-QShortcut* create_window_local_shortcut(QWidget* parent, const int key)
+QShortcut* create_window_local_shortcut(QWidget* parent, const QKeySequence key_sequence)
 {
     return
         new QShortcut(
-            QKeySequence(key),
+            QKeySequence(key_sequence),
             parent,
             nullptr,
             nullptr,

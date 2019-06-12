@@ -64,7 +64,7 @@ class Transform
     typedef Transform<T> TransformType;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Transform() = default;                      // leave the transformation uninitialized
 #else
     Transform() {}                              // leave the transformation uninitialized
@@ -178,7 +178,7 @@ class TransformInterpolator
     typedef Transform<T> TransformType;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     TransformInterpolator() = default;          // leave the interpolator uninitialized
 #else
     TransformInterpolator() {}                  // leave the interpolator uninitialized
@@ -253,8 +253,8 @@ inline Transform<T>::Transform(
 template <typename T>
 void PoisonImpl<Transform<T>>::do_poison(Transform<T>& transform)
 {
-    poison(transform.m_local_to_parent);
-    poison(transform.m_parent_to_local);
+    always_poison(transform.m_local_to_parent);
+    always_poison(transform.m_parent_to_local);
 }
 
 template <typename T>

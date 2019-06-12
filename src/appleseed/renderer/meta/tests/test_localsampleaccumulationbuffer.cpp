@@ -30,11 +30,10 @@
 #include "renderer/kernel/rendering/localsampleaccumulationbuffer.h"
 
 // appleseed.foundation headers.
+#include "foundation/image/accumulatortile.h"
 #include "foundation/image/color.h"
-#include "foundation/image/filteredtile.h"
 #include "foundation/image/tile.h"
 #include "foundation/math/aabb.h"
-#include "foundation/math/filter.h"
 #include "foundation/math/rng/distribution.h"
 #include "foundation/math/rng/mersennetwister.h"
 #include "foundation/math/vector.h"
@@ -53,8 +52,7 @@ TEST_SUITE(Renderer_Kernel_Rendering_LocalSampleAccumulationBuffer)
     bool honors_crop_window(const AABB2u& crop_window)
     {
         // A full low resolution framebuffer.
-        const BoxFilter2<float> filter(0.5f, 0.5f);
-        FilteredTile level(64, 64, 4, filter);
+        AccumulatorTile level(64, 64, 4);
         level.clear();
 
         for (size_t y = 0; y < level.get_height(); ++y)
@@ -62,7 +60,7 @@ TEST_SUITE(Renderer_Kernel_Rendering_LocalSampleAccumulationBuffer)
             for (size_t x = 0; x < level.get_width(); ++x)
             {
                 static const float values[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-                level.add(x + 0.5f, y + 0.5f, values);
+                level.add(Vector2u(x, y), values);
             }
         }
 
@@ -90,7 +88,7 @@ TEST_SUITE(Renderer_Kernel_Rendering_LocalSampleAccumulationBuffer)
         {
             for (size_t x = 0; x < color_tile.get_width(); ++x)
             {
-                float color[4];
+                Color4f color;
                 color_tile.get_pixel(x, y, color);
 
                 const float expected = rect.contains(Vector2u(x, y)) ? 1.0f : 0.0f;

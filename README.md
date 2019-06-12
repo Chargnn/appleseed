@@ -26,7 +26,7 @@ appleseed is available as a portable C++ library with C++ and Python APIs, as a 
 
 * [How to build appleseed from source](https://github.com/appleseedhq/appleseed/wiki/Building-appleseed)
 * [Coding philosophy and guidelines](https://github.com/appleseedhq/appleseed/wiki/Coding-Philosophy-and-Guidelines)
-* [Detailed projects ideas](https://github.com/appleseedhq/appleseed/wiki/List-of-Project-ideas-for-GSoC-2018)
+* [Detailed projects ideas](https://github.com/appleseedhq/appleseed/wiki/List-of-Project-ideas-for-GSoC-2019)
 * [Developer and contributor wiki](https://github.com/appleseedhq/appleseed/wiki)
 
 ## Related Projects
@@ -34,10 +34,10 @@ appleseed is available as a portable C++ library with C++ and Python APIs, as a 
 * [appleseed for Autodesk® Maya®](https://github.com/appleseedhq/appleseed-maya)
 * [appleseed for Autodesk® 3ds Max®](https://github.com/appleseedhq/appleseed-max)
 * [appleseed for Blender](https://github.com/appleseedhq/blenderseed)
-* Image Engine's [Gaffer](http://www.gafferhq.org/) (into which appleseed is built-in)
+* Image Engine's [Gaffer](http://www.gafferhq.org/) (into which appleseed is integrated)
 
 ## License
 
 appleseed and its accompanying software is released under the [MIT license](https://en.wikipedia.org/wiki/MIT_License).
 
-© 2010-2018 The appleseedhq Organization
+© 2010-2019 The appleseedhq Organization

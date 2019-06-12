@@ -218,34 +218,36 @@ namespace
                 if (iterations == 1)
                 {
                     // Shade the first intersection point along the ray.
-                    m_shading_engine.shade(
-                        sampling_context,
-                        pixel_context,
-                        m_shading_context,
-                        *shading_point_ptr,
-                        aov_accumulators,
-                        shading_result);
+                    const bool terminate_path =
+                        m_shading_engine.shade(
+                            sampling_context,
+                            pixel_context,
+                            m_shading_context,
+                            *shading_point_ptr,
+                            aov_accumulators,
+                            shading_result);
 
-                    // Apply alpha premultiplication.
-                    shading_result.apply_alpha_premult();
+                    if (terminate_path)
+                        break;
                 }
                 else
                 {
                     // Shade the next intersection point along the ray.
                     ShadingResult local_result(shading_result.m_aov_count);
-                    m_shading_engine.shade(
-                        sampling_context,
-                        pixel_context,
-                        m_shading_context,
-                        *shading_point_ptr,
-                        aov_accumulators,
-                        local_result);
-
-                    // Apply alpha premultiplication.
-                    local_result.apply_alpha_premult();
+                    const bool terminate_path =
+                        m_shading_engine.shade(
+                            sampling_context,
+                            pixel_context,
+                            m_shading_context,
+                            *shading_point_ptr,
+                            aov_accumulators,
+                            local_result);
 
                     // Composite `shading_result` over `local_result`.
                     shading_result.composite_over(local_result);
+
+                    if (terminate_path)
+                        break;
                 }
 
                 // Stop once we hit the environment.

@@ -55,7 +55,7 @@ namespace renderer
 namespace
 {
     //
-    // NPR shading AOV accumulator.
+    // NPR Shading AOV accumulator.
     //
 
     class NPRShadingAOVAccumulator
@@ -84,7 +84,7 @@ namespace
 
 
     //
-    // NPRShading AOV.
+    // NPR Shading AOV.
     //
 
     const char* NPRShadingAOVModel = "npr_shading_aov";
@@ -108,7 +108,7 @@ namespace
             return NPRShadingAOVModel;
         }
 
-      protected:
+      private:
         auto_release_ptr<AOVAccumulator> create_accumulator() const override
         {
             return auto_release_ptr<AOVAccumulator>(
@@ -118,7 +118,7 @@ namespace
 
 
     //
-    // NPR shading AOV accumulator.
+    // NPR Contour AOV accumulator.
     //
 
     class NPRContourAOVAccumulator
@@ -147,7 +147,7 @@ namespace
 
 
     //
-    // NPRContour AOV.
+    // NPR Contour AOV.
     //
 
     const char* NPRContourAOVModel = "npr_contour_aov";
@@ -171,7 +171,7 @@ namespace
             return NPRContourAOVModel;
         }
 
-      protected:
+      private:
         auto_release_ptr<AOVAccumulator> create_accumulator() const override
         {
             return auto_release_ptr<AOVAccumulator>(
@@ -210,8 +210,7 @@ DictionaryArray NPRShadingAOVFactory::get_input_metadata() const
     return metadata;
 }
 
-auto_release_ptr<AOV> NPRShadingAOVFactory::create(
-    const ParamArray&   params) const
+auto_release_ptr<AOV> NPRShadingAOVFactory::create(const ParamArray& params) const
 {
     return auto_release_ptr<AOV>(new NPRShadingAOV(params));
 }
@@ -246,8 +245,7 @@ DictionaryArray NPRContourAOVFactory::get_input_metadata() const
     return metadata;
 }
 
-auto_release_ptr<AOV> NPRContourAOVFactory::create(
-    const ParamArray&   params) const
+auto_release_ptr<AOV> NPRContourAOVFactory::create(const ParamArray& params) const
 {
     return auto_release_ptr<AOV>(new NPRContourAOV(params));
 }

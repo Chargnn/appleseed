@@ -37,6 +37,7 @@
 #include "renderer/modeling/bsdf/bsdfsample.h"
 #include "renderer/modeling/bsdf/glassbsdf.h"
 #include "renderer/modeling/bsdf/lambertianbrdf.h"
+#include "renderer/modeling/bssrdf/bssrdf.h"
 #include "renderer/modeling/bssrdf/bssrdfsample.h"
 #include "renderer/modeling/bssrdf/sss.h"
 
@@ -52,15 +53,17 @@
 #include "foundation/utility/arena.h"
 #include "foundation/utility/containers/dictionary.h"
 #include "foundation/utility/makevector.h"
+#include "foundation/utility/poison.h"
 
 // Standard headers.
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 // Forward declarations.
-namespace renderer      { class BSDFSample; }
-namespace renderer      { class BSSRDFSample; }
-namespace renderer      { class ShadingContext; }
+namespace renderer  { class BSDFSample; }
+namespace renderer  { class BSSRDFSample; }
+namespace renderer  { class ShadingContext; }
 
 using namespace foundation;
 using namespace std;
@@ -137,29 +140,28 @@ namespace
             const OnFrameBeginMessageContext context("bssrdf", this);
 
             const string surface_bsdf =
-                m_params.get_required<string>(
+                m_params.get_optional<string>(
                     "surface_bsdf_model",
                     "diffuse",
                     make_vector("diffuse", "glass"),
                     context);
 
-            if (surface_bsdf == "diffuse")
-                m_use_glass_bsdf = false;
-            else if (surface_bsdf == "glass" && m_glass_bsdf->on_frame_begin(project, parent, recorder, abort_switch))
-                m_use_glass_bsdf = true;
-            else return false;
+            m_use_glass_bsdf = surface_bsdf == "glass";
 
-            return true;
+            return
+                m_use_glass_bsdf
+                    ? m_glass_bsdf->on_frame_begin(project, parent, recorder, abort_switch)
+                    : true;
         }
 
         void on_frame_end(
             const Project&          project,
             const BaseGroup*        parent) override
         {
-            BSSRDF::on_frame_end(project, parent);
-
             if (m_use_glass_bsdf)
                 m_glass_bsdf->on_frame_end(project, parent);
+
+            BSSRDF::on_frame_end(project, parent);
         }
 
         size_t compute_input_data_size() const override
@@ -235,6 +237,11 @@ namespace
             Vector3f slab_normal;
             Vector3f direction;
             bool transmitted = false;
+
+            debug_poison(scattering_point);
+            always_poison(slab_normal);
+            debug_poison(direction);
+
             if (m_use_glass_bsdf)
             {
                 bool volume_scattering_occurred;
@@ -385,7 +392,7 @@ namespace
             bssrdf_sample.m_incoming_point.flip_side();
 
             // Sample the BSDF at the incoming point.
-            bsdf_sample.m_mode = ScatteringMode::None;
+            bsdf_sample.set_to_absorption();
             bsdf_sample.m_shading_point = &bssrdf_sample.m_incoming_point;
             bsdf_sample.m_geometric_normal = Vector3f(bssrdf_sample.m_incoming_point.get_geometric_normal());
             bsdf_sample.m_shading_basis = Basis3f(bssrdf_sample.m_incoming_point.get_shading_basis());
@@ -397,7 +404,7 @@ namespace
                 true,
                 bssrdf_sample.m_modes,
                 bsdf_sample);
-            if (bsdf_sample.m_mode == ScatteringMode::None)
+            if (bsdf_sample.get_mode() == ScatteringMode::None)
                 return false;
 
             const float cos_in = min(abs(dot(
@@ -482,13 +489,14 @@ namespace
         }
 
         static Vector3f sample_direction_given_cosine(
-            const Vector3f& normal,
-            const float cosine,
-            const float s)
+            const Vector3f&         normal,
+            const float             cosine,
+            const float             s)
         {
-            const float sine = std::sqrt(saturate(1.0f - cosine * cosine));
+            assert(abs(cosine) <= 1.0f);
+            const Basis3f basis(normal);
             const Vector2f tangent = sample_circle_uniform(s);
-            Basis3f basis(normal);
+            const float sine = sqrt(max(1.0f - cosine * cosine, 0.0f));
             return
                 basis.get_tangent_u() * tangent.x * sine +
                 basis.get_tangent_v() * tangent.y * sine +
@@ -504,8 +512,7 @@ namespace
             const float s = sampling_context.next2<float>();
 
             // Compute the probability of extending this path.
-            const float scattering_prob =
-                std::min(max_value(bssrdf_sample.m_value), 0.99f);
+            const float scattering_prob = min(max_value(bssrdf_sample.m_value), 0.99f);
 
             // Russian Roulette.
             if (!pass_rr(scattering_prob, s))
@@ -518,10 +525,81 @@ namespace
             return true;
         }
 
-        // Compute the probability to pick classical sampling instead of biased (Dwivedi) sampling.
-        static float compute_classical_sampling_probability(const float anisotropy)
+        static void compute_transmission(
+            const float             distance,
+            const Spectrum&         extinction,
+            const Spectrum&         channel_pdf,
+            const bool              transmitted,
+            Spectrum&               transmission)
         {
-            return max(0.1f, pow(abs(anisotropy), 3.0f));
+            float mis_base = 0.0f;
+
+            if (transmitted)
+            {
+                for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
+                {
+                    const float x = -distance * extinction[i];
+                    assert(FP<float>::is_finite(x));
+
+                    transmission[i] = exp(x);
+
+                    // One-sample estimator (Veach: 9.2.4 eq. 9.15).
+                    mis_base += transmission[i] * channel_pdf[i];
+                }
+            }
+            else
+            {
+                for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
+                {
+                    const float x = -distance * extinction[i];
+                    assert(FP<float>::is_finite(x));
+
+                    transmission[i] = exp(x) * extinction[i];
+
+                    // One-sample estimator (Veach: 9.2.4 eq. 9.15).
+                    mis_base += transmission[i] * channel_pdf[i];
+                }
+            }
+
+            transmission *= rcp(mis_base);
+        }
+
+        static void compute_transmission(
+            const float             distance,
+            const Spectrum&         extinction,
+            const bool              transmitted,
+            Spectrum&               transmission)
+        {
+            float mis_base = 0.0f;
+
+            if (transmitted)
+            {
+                for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
+                {
+                    const float x = -distance * extinction[i];
+                    assert(FP<float>::is_finite(x));
+
+                    transmission[i] = exp(x);
+
+                    // One-sample estimator (Veach: 9.2.4 eq. 9.15).
+                    mis_base += transmission[i];
+                }
+            }
+            else
+            {
+                for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
+                {
+                    const float x = -distance * extinction[i];
+                    assert(FP<float>::is_finite(x));
+
+                    transmission[i] = exp(x) * extinction[i];
+
+                    // One-sample estimator (Veach: 9.2.4 eq. 9.15).
+                    mis_base += transmission[i];
+                }
+            }
+
+            transmission *= Spectrum::size() / mis_base;
         }
 
         bool trace_zero_scattering_path_glass(
@@ -538,9 +616,6 @@ namespace
             Vector3f&               slab_normal,
             Vector3f&               direction) const
         {
-            // Initialize the number of iterations.
-            size_t n_iteration = 0;
-
             const ShadingPoint* shading_point_ptr = &outgoing_point;
             size_t next_point_idx = 0;
             ShadingPoint shading_points[2];
@@ -557,6 +632,7 @@ namespace
             volume_scattering_occurred = false;
             direction = -outgoing_dir;
             const size_t MaxIterationsCount = 32;
+            size_t n_iteration = 0;
             while (!volume_scattering_occurred)
             {
                 if (++n_iteration > MaxIterationsCount)
@@ -568,12 +644,12 @@ namespace
                 bsdf_sample.m_geometric_normal = Vector3f(shading_point_ptr->get_geometric_normal());
                 bsdf_sample.m_shading_basis = Basis3f(shading_point_ptr->get_shading_basis());
                 bsdf_sample.m_outgoing = Dual3f(-direction);
-                bsdf_sample.m_mode = ScatteringMode::None;
+                bsdf_sample.set_to_absorption();
                 m_glass_bsdf->sample(sampling_context, glass_inputs, false, true, ScatteringMode::All, bsdf_sample);
                 const bool crossing_interface =
                     dot(bsdf_sample.m_outgoing.get_value(), bsdf_sample.m_geometric_normal) *
                     dot(bsdf_sample.m_incoming.get_value(), bsdf_sample.m_geometric_normal) < 0.0;
-                if (bsdf_sample.m_mode == ScatteringMode::None)
+                if (bsdf_sample.get_mode() == ScatteringMode::None)
                     return false;
 
                 assert(n_iteration != 1 || crossing_interface);  // no reflection should happen at the entry point
@@ -581,6 +657,7 @@ namespace
                 {
                     if (!ScatteringMode::has_glossy(bssrdf_sample.m_modes))
                         return false;
+
                     // The ray was refracted with zero scattering.
                     glass_inputs->m_reflection_tint.set(0.0f);
                     m_glass_bsdf->prepare_inputs(shading_context.get_arena(), *shading_point_ptr, glass_inputs);
@@ -589,8 +666,9 @@ namespace
                     bssrdf_sample.m_incoming_point = *shading_point_ptr;
                     return true;
                 }
+
                 bssrdf_sample.m_value *= bsdf_sample.m_value.m_glossy;
-                bssrdf_sample.m_value /= bsdf_sample.m_probability;
+                bssrdf_sample.m_value /= bsdf_sample.get_probability();
                 glass_inputs->m_reflection_tint.set(1.0f);
 
                 // Sample distance (we always use classical sampling here).
@@ -628,6 +706,7 @@ namespace
                         ? Vector3f(shading_point_ptr->get_geometric_normal())
                         : Vector3f(-shading_points[next_point_idx].get_geometric_normal());
                 }
+
                 Spectrum transmission;
                 compute_transmission(
                     static_cast<float>(volume_scattering_occurred ? distance : ray_length),
@@ -710,53 +789,6 @@ namespace
             }
 
             return true;
-        }
-
-        static void compute_transmission(
-            const float             distance,
-            const Spectrum&         extinction,
-            const Spectrum&         channel_pdf,
-            const bool              transmitted,
-            Spectrum&               transmission)
-        {
-            float mis_base = 0.0f;
-
-            for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
-            {
-                const float x = -distance * extinction[i];
-                assert(FP<float>::is_finite(x));
-                transmission[i] = std::exp(x);
-                if (!transmitted)
-                    transmission[i] *= extinction[i];
-
-                // One-sample estimator (Veach: 9.2.4 eq. 9.15).
-                mis_base += transmission[i] * channel_pdf[i];
-            }
-
-            transmission *= rcp(mis_base);
-        }
-
-        static void compute_transmission(
-            const float             distance,
-            const Spectrum&         extinction,
-            const bool              transmitted,
-            Spectrum&               transmission)
-        {
-            float mis_base = 0.0f;
-
-            for (size_t i = 0, e = Spectrum::size(); i < e; ++i)
-            {
-                const float x = -distance * extinction[i];
-                assert(FP<float>::is_finite(x));
-                transmission[i] = std::exp(x);
-                if (!transmitted)
-                    transmission[i] *= extinction[i];
-
-                // One-sample estimator (Veach: 9.2.4 eq. 9.15).
-                mis_base += transmission[i];
-            }
-
-            transmission *= Spectrum::size() / mis_base;
         }
 
         float compute_total_refraction_intensity(
@@ -922,7 +954,7 @@ DictionaryArray RandomwalkBSSRDFFactory::get_input_metadata() const
                 Dictionary()
                     .insert("Glass BSDF", "glass")
                     .insert("Diffuse BTDF", "diffuse"))
-            .insert("use", "required")
+            .insert("use", "optional")
             .insert("default", "diffuse")
             .insert("on_change", "rebuild_form"));
 

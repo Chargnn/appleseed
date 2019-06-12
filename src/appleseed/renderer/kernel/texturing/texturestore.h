@@ -98,11 +98,22 @@ class TextureStore
         bool operator<(const TileKey& rhs) const;
     };
 
+    struct TileKeyHasher
+    {
+        size_t operator()(const TileKey& key) const;
+    };
+
     struct TileRecord
     {
         foundation::Tile*           m_tile;
         volatile foundation::uint32 m_owners;
     };
+
+    // Return parameters metadata.
+    static foundation::Dictionary get_params_metadata();
+
+    // Return the default texture store size in bytes.
+    static size_t get_default_size();
 
     // Constructor.
     TextureStore(
@@ -118,18 +129,7 @@ class TextureStore
     // Retrieve performance statistics.
     foundation::StatisticsVector get_statistics() const;
 
-    // Return the default texture store size in bytes.
-    static size_t get_default_size();
-
-    // Return the metadata of the texture store parameters.
-    static foundation::Dictionary get_params_metadata();
-
   private:
-    struct TileKeyHasher
-    {
-        size_t operator()(const TileKey& key) const;
-    };
-
     class TileSwapper
       : public foundation::NonCopyable
     {
@@ -248,7 +248,7 @@ inline TextureStore::TileKey::TileKey(const TileKey& rhs)
 
 inline size_t TextureStore::TileKey::get_tile_x() const
 {
-    return static_cast<size_t>(m_tile_xy & 0x0000FFFFUL);
+    return static_cast<size_t>(m_tile_xy & 0x0000FFFFu);
 }
 
 inline size_t TextureStore::TileKey::get_tile_y() const
@@ -295,7 +295,11 @@ inline bool TextureStore::TileKey::operator<(const TileKey& rhs) const
 
 inline size_t TextureStore::TileKeyHasher::operator()(const TileKey& key) const
 {
-    return foundation::mix_uint64(key.m_assembly_uid, key.m_texture_uid, key.m_tile_xy);
+    return
+        foundation::mix_uint32(
+            static_cast<foundation::uint32>(key.m_assembly_uid),
+            static_cast<foundation::uint32>(key.m_texture_uid),
+            static_cast<foundation::uint32>(key.m_tile_xy));
 }
 
 

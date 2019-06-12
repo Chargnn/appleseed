@@ -41,6 +41,7 @@
 #include "mainwindow/project/projectexplorer.h"
 #include "mainwindow/pythonconsole/pythonconsolewidget.h"
 #include "mainwindow/rendering/lightpathstab.h"
+#include "mainwindow/rendering/materialdrophandler.h"
 #include "mainwindow/rendering/renderwidget.h"
 #include "utility/interop.h"
 #include "utility/miscellaneous.h"
@@ -65,11 +66,11 @@
 #include "foundation/math/vector.h"
 #include "foundation/platform/compiler.h"
 #include "foundation/platform/path.h"
+#include "foundation/platform/python.h"
 #include "foundation/platform/system.h"
 #include "foundation/utility/containers/dictionary.h"
 #include "foundation/utility/foreach.h"
 #include "foundation/utility/log/logmessage.h"
-#include "foundation/utility/settings.h"
 
 // Qt headers.
 #include <QAction>
@@ -77,6 +78,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
+#include <QDragEnterEvent>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QLabel>
@@ -84,6 +86,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QRect>
 #include <QSettings>
 #include <QStatusBar>
@@ -132,32 +135,19 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_ui->setupUi(this);
 
-    statusBar()->addWidget(&m_status_bar);
-
     build_menus();
+    build_status_bar();
     build_toolbar();
     build_log_panel();
     build_python_console_panel();
     build_project_explorer();
-
     build_connections();
 
-    const QSettings settings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION);
-    restoreGeometry(settings.value("main_window_geometry").toByteArray());
-    restoreState(settings.value("main_window_state").toByteArray());
-    m_ui->treewidget_project_explorer_scene->header()->restoreGeometry(
-        settings.value("main_window_project_explorer_geometry").toByteArray());
-    m_ui->treewidget_project_explorer_scene->header()->restoreState(
-        settings.value("main_window_project_explorer_state").toByteArray());
-
-    print_startup_information();
-    slot_load_settings();
+    slot_load_application_settings();
+    slot_check_fullscreen();
 
     update_project_explorer();
-    remove_render_tabs();
     update_workspace();
-
-    build_minimize_buttons();
 
     setAcceptDrops(true);
 }
@@ -219,7 +209,7 @@ bool MainWindow::open_project(const QString& filepath)
     set_rendering_widgets_enabled(false, NotRendering);
     set_diagnostics_widgets_enabled(false, NotRendering);
 
-    const bool successful = m_project_manager.load_project(filepath.toAscii().constData());
+    const bool successful = m_project_manager.load_project(filepath.toUtf8().constData());
 
     if (successful)
     {
@@ -251,7 +241,7 @@ void MainWindow::open_project_async(const QString& filepath)
     set_rendering_widgets_enabled(false, NotRendering);
     set_diagnostics_widgets_enabled(false, NotRendering);
 
-    m_project_manager.load_project_async(filepath.toAscii().constData());
+    m_project_manager.load_project_async(filepath.toUtf8().constData());
 }
 
 void MainWindow::open_and_render_project(const QString& filepath, const QString& configuration)
@@ -282,7 +272,7 @@ bool MainWindow::save_project(QString filepath)
     if (m_project_file_watcher)
         stop_monitoring_project_file();
 
-    const bool successful = m_project_manager.save_project_as(filepath.toAscii().constData());
+    const bool successful = m_project_manager.save_project_as(filepath.toUtf8().constData());
 
     if (m_project_file_watcher)
         start_monitoring_project_file();
@@ -304,7 +294,7 @@ bool MainWindow::pack_project(QString filepath)
     if (QFileInfo(filepath).suffix() != Extension)
         filepath += "." + Extension;
 
-    return m_project_manager.pack_project_as(filepath.toAscii().constData());
+    return m_project_manager.pack_project_as(filepath.toUtf8().constData());
 }
 
 void MainWindow::close_project()
@@ -318,9 +308,9 @@ ProjectManager* MainWindow::get_project_manager()
     return &m_project_manager;
 }
 
-ParamArray& MainWindow::get_settings()
+ParamArray& MainWindow::get_application_settings()
 {
-    return m_settings;
+    return m_application_settings;
 }
 
 QDockWidget* MainWindow::create_dock_widget(const char* dock_name)
@@ -331,7 +321,7 @@ QDockWidget* MainWindow::create_dock_widget(const char* dock_name)
     dock_widget->setObjectName(object_name);
     dock_widget->setWindowTitle(dock_name);
 
-    const auto actions = m_ui->menu_view->actions();
+    const QList<QAction*> actions = m_ui->menu_view->actions();
     QAction* menu_separator = actions.last();
     for (int i = actions.size() - 2; i != 0; --i)
     {
@@ -398,9 +388,14 @@ void MainWindow::build_menus()
     m_ui->menu_view->addAction(m_ui->python_console->toggleViewAction());
     m_ui->menu_view->addSeparator();
 
-    QAction* fullscreen_action = m_ui->menu_view->addAction("Fullscreen");
-    fullscreen_action->setShortcut(Qt::Key_F11);
-    connect(fullscreen_action, SIGNAL(triggered()), SLOT(slot_fullscreen()));
+    m_action_fullscreen = m_ui->menu_view->addAction("Fullscreen");
+    m_action_fullscreen->setCheckable(true);
+    m_action_fullscreen->setShortcut(Qt::Key_F11);
+
+    for (const auto dock_widget : findChildren<QDockWidget*>())
+        connect(dock_widget->toggleViewAction(), SIGNAL(triggered()), SLOT(slot_check_fullscreen()));
+
+    connect(m_action_fullscreen, SIGNAL(triggered()), SLOT(slot_fullscreen()));
 
     //
     // Rendering menu.
@@ -431,9 +426,9 @@ void MainWindow::build_menus()
     // Tools menu.
     //
 
-    connect(m_ui->action_tools_settings, SIGNAL(triggered()), SLOT(slot_show_settings_window()));
-    connect(m_ui->action_tools_save_settings, SIGNAL(triggered()), SLOT(slot_save_settings()));
-    connect(m_ui->action_tools_reload_settings, SIGNAL(triggered()), SLOT(slot_load_settings()));
+    connect(m_ui->action_tools_settings, SIGNAL(triggered()), SLOT(slot_show_application_settings_window()));
+    connect(m_ui->action_tools_save_settings, SIGNAL(triggered()), SLOT(slot_save_application_settings()));
+    connect(m_ui->action_tools_reload_settings, SIGNAL(triggered()), SLOT(slot_load_application_settings()));
 
     //
     // Help menu.
@@ -459,7 +454,7 @@ void MainWindow::build_override_shading_menu_item()
 
         QAction* action = new QAction(this);
         action->setObjectName(
-            QString::fromAscii("action_diagnostics_override_shading_") + shading_mode_value);
+            QString::fromUtf8("action_diagnostics_override_shading_") + shading_mode_value);
         action->setCheckable(true);
         action->setText(shading_mode_name);
 
@@ -467,7 +462,7 @@ void MainWindow::build_override_shading_menu_item()
         if (shortcut_number <= 9)
         {
             action->setShortcut(
-                QKeySequence(QString::fromAscii("Ctrl+Shift+%1").arg(shortcut_number)));
+                QKeySequence(QString::fromUtf8("Ctrl+Shift+%1").arg(shortcut_number)));
         }
 
         action->setData(shading_mode_value);
@@ -589,6 +584,23 @@ void MainWindow::update_pause_resume_checkbox(const bool checked)
     m_ui->action_rendering_pause_resume_rendering->blockSignals(old_state);
 }
 
+void MainWindow::build_status_bar()
+{
+    statusBar()->addWidget(&m_status_bar);
+
+    m_minimize_buttons.push_back(new MinimizeButton(m_ui->project_explorer));
+    m_minimize_buttons.push_back(new MinimizeButton(m_ui->attribute_editor));
+    m_minimize_buttons.push_back(new MinimizeButton(m_ui->log));
+    m_minimize_buttons.push_back(new MinimizeButton(m_ui->python_console));
+
+    for (size_t i = 0; i < m_minimize_buttons.size(); ++i)
+    {
+        statusBar()->insertPermanentWidget(
+            static_cast<int>(i + 1),
+            m_minimize_buttons[i]);
+    }
+}
+
 void MainWindow::build_toolbar()
 {
     //
@@ -647,25 +659,39 @@ void MainWindow::build_toolbar()
 void MainWindow::build_log_panel()
 {
     LogWidget* log_widget = new LogWidget(m_ui->log_contents);
-    m_ui->log_contents->layout()->addWidget(log_widget);
-
     log_widget->setObjectName("textedit_log");
     log_widget->setUndoRedoEnabled(false);
     log_widget->setLineWrapMode(QTextEdit::NoWrap);
     log_widget->setReadOnly(true);
     log_widget->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_ui->log_contents->layout()->addWidget(log_widget);
 
     m_log_target.reset(new QtLogTarget(log_widget));
-
     global_logger().add_target(m_log_target.get());
+
+    RENDERER_LOG_INFO(
+        "%s, %s configuration\n"
+        "compiled on %s at %s using %s version %s",
+        Appleseed::get_synthetic_version_string(),
+        Appleseed::get_lib_configuration(),
+        Appleseed::get_lib_compilation_date(),
+        Appleseed::get_lib_compilation_time(),
+        Compiler::get_compiler_name(),
+        Compiler::get_compiler_version());
+
+    System::print_information(global_logger());
 }
 
 void MainWindow::build_python_console_panel()
 {
-    PythonConsoleWidget* console_widget = new PythonConsoleWidget(m_ui->python_console_contents);
-    m_ui->python_console_contents->layout()->addWidget(console_widget);
+    char* python_home = Py_GetPythonHome();
+    if (python_home == nullptr)
+        RENDERER_LOG_INFO("Python home not set.");
+    else RENDERER_LOG_INFO("Python home set to %s.", python_home);
 
-    console_widget->setObjectName("textedit_console");
+    PythonConsoleWidget* python_console_widget = new PythonConsoleWidget(m_ui->python_console_contents);
+    python_console_widget->setObjectName("textedit_python_console");
+    m_ui->python_console_contents->layout()->addWidget(python_console_widget);
 }
 
 void MainWindow::build_project_explorer()
@@ -685,21 +711,6 @@ void MainWindow::build_project_explorer()
     m_ui->pushbutton_clear_filter->setEnabled(false);
 }
 
-void MainWindow::build_minimize_buttons()
-{
-    m_minimize_buttons.push_back(new MinimizeButton(m_ui->project_explorer));
-    m_minimize_buttons.push_back(new MinimizeButton(m_ui->attribute_editor));
-    m_minimize_buttons.push_back(new MinimizeButton(m_ui->log));
-    m_minimize_buttons.push_back(new MinimizeButton(m_ui->python_console));
-
-    for (size_t i = 0; i < m_minimize_buttons.size(); ++i)
-    {
-        statusBar()->insertPermanentWidget(
-            static_cast<int>(i + 1),
-            m_minimize_buttons[i]);
-    }
-}
-
 void MainWindow::build_connections()
 {
     connect(
@@ -717,10 +728,6 @@ void MainWindow::build_connections()
     connect(
         &m_rendering_manager, SIGNAL(signal_rendering_end()),
         SLOT(slot_rendering_end()));
-
-    connect(
-        &m_rendering_manager, SIGNAL(signal_camera_changed()),
-        SLOT(slot_camera_changed()));
 }
 
 void MainWindow::update_workspace()
@@ -756,15 +763,16 @@ void MainWindow::update_project_explorer()
             new AttributeEditor(
                 m_ui->attribute_editor_scrollarea_contents,
                 *m_project_manager.get_project(),
-                m_settings);
+                m_application_settings);
 
         m_project_explorer =
             new ProjectExplorer(
                 m_ui->treewidget_project_explorer_scene,
                 m_attribute_editor,
                 *m_project_manager.get_project(),
+                m_project_manager,
                 m_rendering_manager,
-                m_settings);
+                m_application_settings);
 
         connect(
             m_project_explorer, SIGNAL(signal_project_modified()),
@@ -966,6 +974,7 @@ void MainWindow::add_render_tab(const QString& label)
         new RenderTab(
             *m_project_explorer,
             *m_project_manager.get_project(),
+            m_rendering_manager,
             m_ocio_config);
 
     // Connect the render tab to the main window and the rendering manager.
@@ -979,11 +988,11 @@ void MainWindow::add_render_tab(const QString& label)
         render_tab, SIGNAL(signal_clear_render_region()),
         SLOT(slot_clear_render_region()));
     connect(
-        render_tab, SIGNAL(signal_save_raw_frame_and_aovs()),
-        SLOT(slot_save_raw_frame_and_aovs()));
+        render_tab, SIGNAL(signal_save_frame_and_aovs()),
+        SLOT(slot_save_frame_and_aovs()));
     connect(
-        render_tab, SIGNAL(signal_quicksave_raw_frame_and_aovs()),
-        SLOT(slot_quicksave_raw_frame_and_aovs()));
+        render_tab, SIGNAL(signal_quicksave_frame_and_aovs()),
+        SLOT(slot_quicksave_frame_and_aovs()));
     connect(
         render_tab, SIGNAL(signal_reset_zoom()),
         SLOT(slot_reset_zoom()));
@@ -1002,9 +1011,6 @@ void MainWindow::add_render_tab(const QString& label)
     connect(
         render_tab, SIGNAL(signal_camera_changed()),
         &m_rendering_manager, SLOT(slot_camera_changed()));
-    connect(
-        render_tab, SIGNAL(signal_camera_changed()),
-        &m_rendering_manager, SIGNAL(signal_camera_changed()));
 
     // Add the render tab to the tab bar.
     const int tab_index = m_ui->tab_render_channels->addTab(render_tab, label);
@@ -1022,7 +1028,7 @@ void MainWindow::add_light_paths_tab()
         m_light_paths_tab =
             new LightPathsTab(
                 *m_project_manager.get_project(),
-                m_settings);
+                m_application_settings);
 
         // Connect render tabs to the light paths tab.
         for (const auto& kv : m_render_tabs)
@@ -1058,11 +1064,14 @@ ParamArray MainWindow::get_project_params(const char* configuration_name) const
             ? m_project_manager.get_project()->configurations().get_by_name(configuration_name)
             : nullptr;
 
+    // Start with the parameters from the base configuration.
     if (configuration && configuration->get_base())
         params = configuration->get_base()->get_parameters();
 
-    params.merge(m_settings);
+    // Override with application settings.
+    params.merge(m_application_settings);
 
+    // Override with parameters from the configuration.
     if (configuration)
         params.merge(configuration->get_parameters());
 
@@ -1190,8 +1199,8 @@ void MainWindow::stop_monitoring_project_file()
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (event->mimeData()->hasFormat("text/plain") || event->mimeData()->hasFormat("text/uri-list"))
-         event->acceptProposedAction();
+    if (event->mimeData()->hasFormat("text/uri-list"))
+        event->acceptProposedAction();
 }
 
 void MainWindow::dropEvent(QDropEvent* event)
@@ -1201,15 +1210,8 @@ void MainWindow::dropEvent(QDropEvent* event)
         const QList<QUrl> urls = event->mimeData()->urls();
         QApplication::sendEvent(this, new QCloseEvent());
         open_project_async(urls[0].toLocalFile());
+        event->acceptProposedAction();
     }
-    else
-    {
-        const QString text = event->mimeData()->text();
-        QApplication::sendEvent(this, new QCloseEvent());
-        open_project_async(text);
-    }
-
-     event->accept();
 }
 
 void MainWindow::start_rendering(const RenderingMode rendering_mode)
@@ -1226,7 +1228,7 @@ void MainWindow::start_rendering(const RenderingMode rendering_mode)
     set_file_widgets_enabled(false, rendering_mode);
     set_project_explorer_enabled(rendering_mode == InteractiveRendering);
     set_rendering_widgets_enabled(true, rendering_mode);
-    set_diagnostics_widgets_enabled(true, rendering_mode);
+    set_diagnostics_widgets_enabled(rendering_mode == InteractiveRendering, rendering_mode);
     m_ui->attribute_editor_scrollarea_contents->setEnabled(rendering_mode == InteractiveRendering);
 
     // Remove light paths tab.
@@ -1274,7 +1276,7 @@ void MainWindow::apply_false_colors_settings()
     Frame* frame = project->get_frame();
     assert(frame != nullptr);
 
-    const ParamArray& false_colors_params = m_settings.child("false_colors");
+    const ParamArray& false_colors_params = m_application_settings.child("false_colors");
     const bool false_colors_enabled = false_colors_params.get_optional<bool>("enabled", false);
 
     if (false_colors_enabled)
@@ -1332,21 +1334,6 @@ void MainWindow::apply_post_processing_stage(
     }
 }
 
-void MainWindow::print_startup_information()
-{
-    RENDERER_LOG_INFO(
-        "%s, %s configuration\n"
-        "compiled on %s at %s using %s version %s",
-        Appleseed::get_synthetic_version_string(),
-        Appleseed::get_lib_configuration(),
-        Appleseed::get_lib_compilation_date(),
-        Appleseed::get_lib_compilation_time(),
-        Compiler::get_compiler_name(),
-        Compiler::get_compiler_version());
-
-    System::print_information(global_logger());
-}
-
 namespace
 {
     int ask_abort_rendering_confirmation(QWidget* parent)
@@ -1382,15 +1369,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
         return;
     }
 
-    QSettings settings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION);
-    settings.setValue("main_window_geometry", saveGeometry());
-    settings.setValue("main_window_state", saveState());
-    settings.setValue("main_window_project_explorer_geometry",
-        m_ui->treewidget_project_explorer_scene->header()->saveGeometry());
-    settings.setValue("main_window_project_explorer_state",
-        m_ui->treewidget_project_explorer_scene->header()->saveState());
-
-    slot_save_settings();
+    slot_save_application_settings();
 
     if (m_test_window.get())
         m_test_window->close();
@@ -1423,7 +1402,7 @@ void MainWindow::slot_open_project()
             this,
             "Open...",
             get_project_files_filter(),
-            m_settings,
+            m_application_settings,
             SETTINGS_FILE_DIALOG_PROJECTS);
 
     if (!filepath.isEmpty())
@@ -1541,7 +1520,7 @@ void MainWindow::slot_save_project_as()
             this,
             "Save As...",
             get_project_files_filter(ProjectFilesFilterPlainProjects),
-            m_settings,
+            m_application_settings,
             SETTINGS_FILE_DIALOG_PROJECTS);
 
     if (!filepath.isEmpty())
@@ -1561,7 +1540,7 @@ void MainWindow::slot_pack_project_as()
             this,
             "Pack As...",
             get_project_files_filter(ProjectFilesFilterPackedProjects),
-            m_settings,
+            m_application_settings,
             SETTINGS_FILE_DIALOG_PROJECTS);
 
     if (!filepath.isEmpty())
@@ -1633,7 +1612,7 @@ void MainWindow::slot_toggle_project_file_monitoring(const bool checked)
         enable_project_file_monitoring();
     else disable_project_file_monitoring();
 
-    m_settings.insert_path(
+    m_application_settings.insert_path(
         SETTINGS_WATCH_FILE_CHANGES,
         m_project_file_watcher != nullptr);
 }
@@ -1648,58 +1627,42 @@ void MainWindow::slot_project_file_changed(const QString& filepath)
     slot_reload_project();
 }
 
-void MainWindow::slot_load_settings()
+void MainWindow::slot_load_application_settings()
 {
+    const QSettings qt_settings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION);
+    restoreGeometry(qt_settings.value("main_window_geometry").toByteArray());
+    restoreState(qt_settings.value("main_window_state").toByteArray());
+    m_ui->treewidget_project_explorer_scene->header()->restoreGeometry(
+        qt_settings.value("main_window_project_explorer_geometry").toByteArray());
+    m_ui->treewidget_project_explorer_scene->header()->restoreState(
+        qt_settings.value("main_window_project_explorer_state").toByteArray());
+
     Dictionary settings;
-
-    if (!Application::load_settings("appleseed.studio.xml", settings, global_logger(), LogMessage::Info))
-        return;
-
-    m_settings = settings;
-
-    slot_apply_settings();
+    if (Application::load_settings("appleseed.studio.xml", settings, global_logger(), LogMessage::Info))
+    {
+        m_application_settings = settings;
+        slot_apply_application_settings();
+    }
 }
 
-void MainWindow::slot_save_settings()
+void MainWindow::slot_save_application_settings()
 {
-    SettingsFileWriter writer;
+    QSettings settings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION);
+    settings.setValue("main_window_geometry", saveGeometry());
+    settings.setValue("main_window_state", saveState());
+    settings.setValue("main_window_project_explorer_geometry",
+        m_ui->treewidget_project_explorer_scene->header()->saveGeometry());
+    settings.setValue("main_window_project_explorer_state",
+        m_ui->treewidget_project_explorer_scene->header()->saveState());
 
-    // First try to save the settings to the user path.
-    if (const char* p = Application::get_user_settings_path())
-    {
-        try
-        {
-            const bf::path user_settings_path(p);
-            bf::create_directories(user_settings_path);
-            const string user_settings_file_path = (user_settings_path / "appleseed.studio.xml").string();
-            if (writer.write(user_settings_file_path.c_str(), m_settings))
-            {
-                RENDERER_LOG_INFO("successfully saved settings to %s.", user_settings_file_path.c_str());
-                return;
-            }
-        }
-        catch (const bf::filesystem_error&)
-        {
-        }
-    }
-
-    // As a fallback, try to save the settings to the appleseed's installation directory.
-    const bf::path root_path(Application::get_root_path());
-    const string settings_file_path = (root_path / "settings" / "appleseed.studio.xml").string();
-    if (writer.write(settings_file_path.c_str(), m_settings))
-    {
-        RENDERER_LOG_INFO("successfully saved settings to %s.", settings_file_path.c_str());
-        return;
-    }
-
-    RENDERER_LOG_ERROR("failed to save settings to %s.", settings_file_path.c_str());
+    Application::save_settings("appleseed.studio.xml", m_application_settings, global_logger(), LogMessage::Info);
 }
 
-void MainWindow::slot_apply_settings()
+void MainWindow::slot_apply_application_settings()
 {
-    if (m_settings.strings().exist(SETTINGS_MESSAGE_VERBOSITY))
+    if (m_application_settings.strings().exist(SETTINGS_MESSAGE_VERBOSITY))
     {
-        const char* level_name = m_settings.get(SETTINGS_MESSAGE_VERBOSITY);
+        const char* level_name = m_application_settings.get(SETTINGS_MESSAGE_VERBOSITY);
         const LogMessage::Category level = LogMessage::get_category_value(level_name);
 
         if (level < LogMessage::NumMessageCategories)
@@ -1707,7 +1670,7 @@ void MainWindow::slot_apply_settings()
         else RENDERER_LOG_ERROR("invalid message verbosity level \"%s\".", level_name);
     }
 
-    if (m_settings.get_optional<bool>(SETTINGS_WATCH_FILE_CHANGES))
+    if (m_application_settings.get_optional<bool>(SETTINGS_WATCH_FILE_CHANGES))
     {
         m_action_monitor_project_file->setChecked(true);
         enable_project_file_monitoring();
@@ -1717,6 +1680,8 @@ void MainWindow::slot_apply_settings()
         m_action_monitor_project_file->setChecked(false);
         disable_project_file_monitoring();
     }
+
+    emit signal_application_settings_modified();
 }
 
 void MainWindow::slot_start_interactive_rendering()
@@ -1860,8 +1825,8 @@ void MainWindow::slot_show_false_colors_window()
 
     m_false_colors_window->initialize(
         *project,
-        m_settings,
-        m_settings.child("false_colors"));
+        m_application_settings,
+        m_application_settings.child("false_colors"));
 
     m_false_colors_window->showNormal();
     m_false_colors_window->activateWindow();
@@ -1869,7 +1834,7 @@ void MainWindow::slot_show_false_colors_window()
 
 void MainWindow::slot_apply_false_colors_settings_changes(Dictionary values)
 {
-    m_settings.push("false_colors").merge(values);
+    m_application_settings.push("false_colors").merge(values);
     apply_false_colors_settings();
 }
 
@@ -1958,7 +1923,7 @@ void MainWindow::slot_set_render_region(const QRect& rect)
     {
         set_render_region_action.get()->operator()(*m_project_manager.get_project());
 
-        if (m_settings.get_path_optional<bool>(SETTINGS_RENDER_REGION_TRIGGERS_RENDERING))
+        if (m_application_settings.get_path_optional<bool>(SETTINGS_RENDER_REGION_TRIGGERS_RENDERING))
             start_rendering(InteractiveRendering);
     }
     else
@@ -1977,9 +1942,10 @@ void MainWindow::slot_render_widget_context_menu(const QPoint& point)
         return;
 
     QMenu* menu = new QMenu(this);
-    menu->addAction("Save Post-Processed Frame...", this, SLOT(slot_save_post_processed_frame()));
-    menu->addAction("Save Raw Frame...", this, SLOT(slot_save_raw_frame()));
-    menu->addAction("Save Raw Frame and AOVs...", this, SLOT(slot_save_raw_frame_and_aovs()));
+    menu->addAction("Save Frame...", this, SLOT(slot_save_frame()));
+    menu->addAction("Save Frame and AOVs...", this, SLOT(slot_save_frame_and_aovs()));
+    menu->addSeparator();
+    menu->addAction("Save Render Widget Content...", this, SLOT(slot_save_render_widget_content()));
     menu->addSeparator();
     menu->addAction("Clear All", this, SLOT(slot_clear_frame()));
     menu->exec(point);
@@ -2014,35 +1980,45 @@ namespace
     }
 }
 
-void MainWindow::slot_save_raw_frame()
+void MainWindow::slot_save_frame()
 {
     assert(m_project_manager.is_project_open());
     assert(!m_rendering_manager.is_rendering());
 
     const QString filepath =
-        ask_frame_save_file_path(this, "Save Raw Frame As...", g_appleseed_image_files_filter, ".exr", m_settings);
+        ask_frame_save_file_path(
+            this,
+            "Save Frame As...",
+            get_oiio_image_files_filter(),
+            ".exr",
+            m_application_settings);
 
     if (filepath.isEmpty())
         return;
 
     const Frame* frame = m_project_manager.get_project()->get_frame();
-    frame->write_main_image(filepath.toAscii().constData());
+    frame->write_main_image(filepath.toUtf8().constData());
 }
 
-void MainWindow::slot_save_raw_frame_and_aovs()
+void MainWindow::slot_save_frame_and_aovs()
 {
     assert(m_project_manager.is_project_open());
     assert(!m_rendering_manager.is_rendering());
 
     const QString filepath =
-        ask_frame_save_file_path(this, "Save Raw Frame and AOVs As...", g_appleseed_image_files_filter, ".exr", m_settings);
+        ask_frame_save_file_path(
+            this,
+            "Save Frame and AOVs As...",
+            get_oiio_image_files_filter(),
+            ".exr",
+            m_application_settings);
 
     if (filepath.isEmpty())
         return;
 
     const Frame* frame = m_project_manager.get_project()->get_frame();
-    frame->write_main_image(filepath.toAscii().constData());
-    frame->write_aov_images(filepath.toAscii().constData());
+    frame->write_main_image(filepath.toUtf8().constData());
+    frame->write_aov_images(filepath.toUtf8().constData());
 }
 
 namespace
@@ -2059,7 +2035,7 @@ namespace
     }
 }
 
-void MainWindow::slot_quicksave_raw_frame_and_aovs()
+void MainWindow::slot_quicksave_frame_and_aovs()
 {
     assert(m_project_manager.is_project_open());
     assert(!m_rendering_manager.is_rendering());
@@ -2080,13 +2056,18 @@ void MainWindow::slot_quicksave_raw_frame_and_aovs()
             find_next_available_path(quicksave_dir / "quicksave####.exr")));
 }
 
-void MainWindow::slot_save_post_processed_frame()
+void MainWindow::slot_save_render_widget_content()
 {
     assert(m_project_manager.is_project_open());
     assert(!m_rendering_manager.is_rendering());
 
     const QString filepath =
-        ask_frame_save_file_path(this, "Save Post-Processed Frame As...", g_qt_image_files_filter, ".png", m_settings);
+        ask_frame_save_file_path(
+            this,
+            "Save Render Widget Content As...",
+            g_qt_image_files_filter,
+            ".png",
+            m_application_settings);
 
     if (filepath.isEmpty())
         return;
@@ -2109,7 +2090,7 @@ void MainWindow::slot_clear_frame()
 
 void MainWindow::slot_reset_zoom()
 {
-    const auto current_tab_index = m_ui->tab_render_channels->currentIndex();
+    const int current_tab_index = m_ui->tab_render_channels->currentIndex();
     const auto render_tab_it = m_tab_index_to_render_tab.find(current_tab_index);
     if (render_tab_it != m_tab_index_to_render_tab.end())
         render_tab_it->second->reset_zoom();
@@ -2138,41 +2119,57 @@ void MainWindow::slot_fullscreen()
 
     bool all_minimized = true;
     bool not_minimized = false;
-    for (each<vector<MinimizeButton*>> button = m_minimize_buttons; button; ++button)
+    for (const MinimizeButton* button : m_minimize_buttons)
     {
-        all_minimized = all_minimized && (*button)->is_on();
-        not_minimized = not_minimized || !(*button)->is_on();
+        all_minimized = all_minimized && button->is_on();
+        not_minimized = not_minimized || !button->is_on();
     }
 
-    // All were manually minimized, exit full screen mode
+    // All were manually minimized, exit full screen mode.
     if (all_minimized)
         m_fullscreen = false;
 
-    // At least one is on screen, enter full screen mode
+    // At least one is on screen, enter full screen mode.
     if (not_minimized)
         m_fullscreen = true;
 
-    for (each<vector<MinimizeButton*>> button = m_minimize_buttons; button; ++button)
-        (*button)->set_fullscreen(m_fullscreen);
+    for (MinimizeButton* button : m_minimize_buttons)
+        button->set_fullscreen(m_fullscreen);
 }
 
-void MainWindow::slot_show_settings_window()
+void MainWindow::slot_check_fullscreen()
 {
-    if (m_settings_window.get() == nullptr)
+    const QList<QDockWidget*> dock_widgets = findChildren<QDockWidget*>();
+
+    const bool is_fullscreen = all_of(dock_widgets.cbegin(),
+                                      dock_widgets.cend(),
+                                      [](QDockWidget* dock) {return dock->isHidden();});
+
+    m_action_fullscreen->setChecked(is_fullscreen);
+}
+
+void MainWindow::slot_show_application_settings_window()
+{
+    if (m_application_settings_window.get() == nullptr)
     {
-        m_settings_window.reset(new SettingsWindow(m_settings, this));
+        m_application_settings_window.reset(
+            new ApplicationSettingsWindow(m_application_settings, this));
 
         connect(
-            m_settings_window.get(), SIGNAL(signal_settings_modified()),
-            SLOT(slot_save_settings()));
+            m_application_settings_window.get(), SIGNAL(signal_application_settings_modified()),
+            SLOT(slot_save_application_settings()));
 
         connect(
-            m_settings_window.get(), SIGNAL(signal_settings_modified()),
-            SLOT(slot_apply_settings()));
+            m_application_settings_window.get(), SIGNAL(signal_application_settings_modified()),
+            SLOT(slot_apply_application_settings()));
+
+        connect(
+            this, SIGNAL(signal_application_settings_modified()),
+            m_application_settings_window.get(), SLOT(slot_reload_application_settings()));
     }
 
-    m_settings_window->showNormal();
-    m_settings_window->activateWindow();
+    m_application_settings_window->showNormal();
+    m_application_settings_window->activateWindow();
 }
 
 void MainWindow::slot_show_rendering_settings_window()
@@ -2182,11 +2179,18 @@ void MainWindow::slot_show_rendering_settings_window()
     if (m_rendering_settings_window.get() == nullptr)
     {
         m_rendering_settings_window.reset(
-            new RenderingSettingsWindow(m_project_manager, this));
+            new RenderingSettingsWindow(
+                m_project_manager,
+                m_application_settings,
+                this));
 
         connect(
-            m_rendering_settings_window.get(), SIGNAL(signal_settings_modified()),
+            m_rendering_settings_window.get(), SIGNAL(signal_rendering_settings_modified()),
             SLOT(slot_project_modified()));
+
+        connect(
+            this, SIGNAL(signal_application_settings_modified()),
+            m_rendering_settings_window.get(), SLOT(slot_reload_application_settings()));
     }
 
     m_rendering_settings_window->showNormal();

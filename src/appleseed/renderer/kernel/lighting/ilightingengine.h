@@ -36,7 +36,6 @@
 #include "foundation/core/concepts/iunknown.h"
 
 // Forward declarations.
-namespace foundation    { class Dictionary; }
 namespace foundation    { class StatisticsVector; }
 namespace renderer      { class AOVComponents; }
 namespace renderer      { class PixelContext; }
@@ -65,7 +64,7 @@ class ILightingEngine
         const ShadingContext&     shading_context,
         const ShadingPoint&       shading_point,
         ShadingComponents&        radiance,           // output radiance, in W.sr^-1.m^-2
-        AOVComponents&            components) = 0;
+        AOVComponents&            aov_components) = 0;
 
     // Retrieve performance statistics.
     virtual foundation::StatisticsVector get_statistics() const = 0;
@@ -82,11 +81,6 @@ class ILightingEngineFactory
   public:
     // Return a new sample lighting engine instance.
     virtual ILightingEngine* create() = 0;
-
-  protected:
-    static void add_common_params_metadata(
-        foundation::Dictionary&   metadata,
-        const bool                add_lighting_samples);
 };
 
 }   // namespace renderer

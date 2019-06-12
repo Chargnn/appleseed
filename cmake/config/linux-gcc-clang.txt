@@ -29,7 +29,7 @@
 
 
 #--------------------------------------------------------------------------------------------------
-# gcc or clang on Linux, generating 32-bit or 64-bit binaries.
+# gcc or clang on Linux.
 #--------------------------------------------------------------------------------------------------
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
@@ -43,29 +43,17 @@ endif ()
 # Compiler version.
 #--------------------------------------------------------------------------------------------------
 
-execute_process (COMMAND ${CMAKE_CXX_COMPILER} -dumpversion
+execute_process (
+    COMMAND ${CMAKE_CXX_COMPILER} -dumpversion
     OUTPUT_VARIABLE COMPILER_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     message (STATUS "Using gcc ${COMPILER_VERSION} as the compiler")
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     message (STATUS "Using clang ${COMPILER_VERSION} as the compiler")
 endif ()
-
-
-#--------------------------------------------------------------------------------------------------
-# Extension of executable files.
-#--------------------------------------------------------------------------------------------------
-
-set (exe_ext "")
-
-
-#--------------------------------------------------------------------------------------------------
-# Tools.
-#--------------------------------------------------------------------------------------------------
-
-set (git_command "git")
 
 
 #--------------------------------------------------------------------------------------------------
@@ -91,19 +79,8 @@ set (c_compiler_flags_common
 set (cxx_compiler_flags_common
     -Wno-reorder
 )
-if (WARNINGS_AS_ERRORS)
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR
-        CMAKE_BUILD_TYPE STREQUAL "Profile" OR
-        CMAKE_BUILD_TYPE STREQUAL "Release")
-        set (c_compiler_flags_common
-            ${c_compiler_flags_common}
-            -Werror                                     # treat Warnings As Errors
-        )
-    endif ()
-endif ()
 set (cxx_compiler_flags_common
     ${cxx_compiler_flags_common}
-    -std=c++11                                          # enable C++11
 )
 if (is_x86)
     if (USE_SSE)
@@ -139,12 +116,21 @@ if (is_x86)
         )
     endif ()
 endif ()
-set (exe_linker_flags_common
-    -Werror                                             # Treat Warnings As Errors
-)
-set (shared_lib_linker_flags_common
-    -Werror                                             # Treat Warnings As Errors
-)
+if (WARNINGS_AS_ERRORS)
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR
+        CMAKE_BUILD_TYPE STREQUAL "Release")
+        set (c_compiler_flags_common
+            ${c_compiler_flags_common}
+            -Werror                                     # treat Warnings As Errors
+        )
+        set (exe_linker_flags_common
+            -Werror                                     # treat Warnings As Errors
+        )
+        set (shared_lib_linker_flags_common
+            -Werror                                     # treat Warnings As Errors
+        )
+    endif ()
+endif ()
 if (HIDE_SYMBOLS)
     set (c_compiler_flags_common
         ${c_compiler_flags_common}
@@ -167,6 +153,8 @@ endif ()
 # Release configuration.
 set (c_compiler_flags_release
     -O3                                                 # optimization level
+    -fgcse-las                                          # Eliminates stores followed by a load to the same positions.
+    -fgcse-sm                                           # Moves load/save instructions out of loops, if possible.
 )
 
 
@@ -181,28 +169,30 @@ macro (link_against_platform target)
     )
 endmacro ()
 
-macro (link_against_zlib target)
-    if (USE_EXTERNAL_ZLIB)
-        target_link_libraries (${target} ${ZLIB_LIBRARIES})
+macro (link_against_embree target)
+    target_link_libraries (${target} ${EMBREE_LIBRARIES})
+endmacro ()
+
+macro (link_against_lz4 target)
+    if (USE_FIND_PACKAGE_FOR_LZ4)
+        target_link_libraries (${target} ${LZ4_LIBRARY})
     else ()
         target_link_libraries (${target}
-            ${CMAKE_SOURCE_DIR}/build/${platform}/zlib/libz.a
+            ${CMAKE_SOURCE_DIR}/build/${platform}/lz4/lz4.a
         )
     endif ()
 endmacro ()
 
-macro (link_against_libpng target)
-    if (USE_EXTERNAL_PNG)
-        target_link_libraries (${target} ${PNG_LIBRARIES})
-    else ()
-        target_link_libraries (${target}
-            ${CMAKE_SOURCE_DIR}/build/${platform}/libpng/libpng.a
-        )
-    endif ()
+macro (link_against_ocio target)
+    target_link_libraries (${target} ${OPENCOLORIO_LIBRARIES})
+endmacro ()
+
+macro (link_against_oiio target)
+    target_link_libraries (${target} ${OPENIMAGEIO_LIBRARIES})
 endmacro ()
 
 macro (link_against_openexr target)
-    if (USE_EXTERNAL_EXR)
+    if (USE_FIND_PACKAGE_FOR_EXR)
         target_link_libraries (${target}
             ${IMATH_LIBRARIES}
             ${OPENEXR_LIBRARIES}
@@ -219,24 +209,6 @@ macro (link_against_openexr target)
     endif ()
 endmacro ()
 
-macro (link_against_xercesc target)
-    if (USE_EXTERNAL_XERCES)
-        target_link_libraries (${target} ${XERCES_LIBRARIES})
-    else ()
-        target_link_libraries (${target}
-            ${CMAKE_SOURCE_DIR}/build/${platform}/xerces-c/libxerces-c.a
-        )
-    endif ()
-endmacro ()
-
-macro (link_against_ocio target)
-    target_link_libraries (${target} ${OPENCOLORIO_LIBRARIES})
-endmacro ()
-
-macro (link_against_oiio target)
-    target_link_libraries (${target} ${OPENIMAGEIO_LIBRARIES})
-endmacro ()
-
 macro (link_against_osl target)
     target_link_libraries (${target} ${OSL_EXEC_LIBRARY} ${OSL_COMP_LIBRARY} ${OSL_QUERY_LIBRARY})
 endmacro ()
@@ -249,9 +221,24 @@ macro (link_against_seexpreditor target)
     target_link_libraries (${target} ${SEEXPREDITOR_LIBRARIES})
 endmacro ()
 
-macro (link_against_embree target)
-    target_link_libraries (${target} ${EMBREE_LIBRARIES})
+macro (link_against_xercesc target)
+    if (USE_FIND_PACKAGE_FOR_XERCES)
+        target_link_libraries (${target} ${XERCES_LIBRARIES})
+    else ()
+        target_link_libraries (${target}
+            ${CMAKE_SOURCE_DIR}/build/${platform}/xerces-c/libxerces-c.a
+        )
+    endif ()
+endmacro ()
 
+macro (link_against_zlib target)
+    if (USE_FIND_PACKAGE_FOR_ZLIB)
+        target_link_libraries (${target} ${ZLIB_LIBRARIES})
+    else ()
+        target_link_libraries (${target}
+            ${CMAKE_SOURCE_DIR}/build/${platform}/zlib/libz.a
+        )
+    endif ()
 endmacro ()
 
 
@@ -269,7 +256,7 @@ endmacro ()
 
 macro (get_sandbox_py_path path)
     get_sandbox_lib_path (${path})
-    set (${path} ${${path}}/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION})
+    set (${path} ${${path}}/python)
 endmacro ()
 
 macro (get_relative_path_from_module_name path name)
@@ -335,7 +322,7 @@ macro (add_copy_studio_py_file_to_sandbox_py_module_command py_src module_name)
     get_relative_path_from_module_name (relative_module_path ${module_name})
     set (module_path "${py_path}/${relative_module_path}")
 
-    add_custom_command (TARGET appleseed.studio.python.copy_py_files POST_BUILD
+    add_custom_command (TARGET appleseed.studio.copy_py_files POST_BUILD
         COMMAND mkdir -p ${module_path}
         COMMAND cp ${py_src} ${module_path}
     )

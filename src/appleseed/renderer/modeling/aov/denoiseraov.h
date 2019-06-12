@@ -41,6 +41,7 @@
 #include <cstddef>
 
 // Forward declarations.
+namespace foundation    { class ImageAttributes; }
 namespace renderer      { class AOV; }
 namespace renderer      { class ParamArray; }
 
@@ -79,13 +80,18 @@ class DenoiserAOV
     const bcd::Deepimf& histograms_image() const;
     bcd::Deepimf& histograms_image();
 
-    void extract_num_samples_image(bcd::Deepimf& num_samples) const;
-    void compute_covariances_image(bcd::Deepimf& covariances) const;
+    const bcd::Deepimf& covariance_image() const;
+    bcd::Deepimf& covariance_image();
 
-    bool write_images(const char* file_path) const;
+    const bcd::Deepimf& sum_image() const;
+    bcd::Deepimf& sum_image();
 
-  protected:
-    foundation::auto_release_ptr<AOVAccumulator> create_accumulator() const override;
+    void extract_num_samples_image(bcd::Deepimf& num_samples_image) const;
+    void compute_covariances_image(bcd::Deepimf& covariances_image) const;
+
+    bool write_images(
+        const char*                         file_path,
+        const foundation::ImageAttributes&  image_attributes) const override;
 
   private:
     friend class DenoiserAOVFactory;
@@ -96,6 +102,8 @@ class DenoiserAOV
     DenoiserAOV(
         const float  max_hist_value,
         const size_t num_bins);
+
+    foundation::auto_release_ptr<AOVAccumulator> create_accumulator() const override;
 };
 
 

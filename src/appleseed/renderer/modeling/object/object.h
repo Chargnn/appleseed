@@ -71,6 +71,8 @@ class APPLESEED_DLLSYMBOL Object
         const ParamArray&   params);
 
     // Return a string identifying the model of this entity.
+    // Model here is synonymous with which "kind" of Object this entity is,
+    // not an identifier for its actual mesh or curve representation.
     virtual const char* get_model() const = 0;
 
     // Compute the local space bounding box of the object over the shutter interval.
@@ -89,15 +91,12 @@ class APPLESEED_DLLSYMBOL Object
     // Return true if this object has an uniform alpha value equals to 1.0f.
     bool has_opaque_uniform_alpha_map() const;
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
     bool on_frame_begin(
         const Project&              project,
         const BaseGroup*            parent,
         OnFrameBeginRecorder&       recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr) override;
 
-    // This method is called once after rendering each frame (only if on_frame_begin() was called).
     void on_frame_end(
         const Project&              project,
         const BaseGroup*            parent) override;

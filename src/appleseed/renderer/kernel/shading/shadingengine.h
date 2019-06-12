@@ -42,6 +42,7 @@
 namespace foundation    { class IAbortSwitch; }
 namespace renderer      { class AOVAccumulatorContainer; }
 namespace renderer      { class OnFrameBeginRecorder; }
+namespace renderer      { class OnRenderBeginRecorder; }
 namespace renderer      { class ParamArray; }
 namespace renderer      { class PixelContext; }
 namespace renderer      { class Project; }
@@ -62,15 +63,21 @@ class ShadingEngine
     // Constructor.
     explicit ShadingEngine(const ParamArray& params);
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
+    // Please refer to the documentation of Entity::on_render_begin().
+    bool on_render_begin(
+        const Project&              project,
+        OnRenderBeginRecorder&      recorder,
+        foundation::IAbortSwitch*   abort_switch = nullptr);
+
+    // Please refer to the documentation of Entity::on_frame_begin().
     bool on_frame_begin(
         const Project&              project,
         OnFrameBeginRecorder&       recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr);
 
     // Shade a given intersection point.
-    void shade(
+    // Returns true if the path should be terminated.
+    bool shade(
         SamplingContext&            sampling_context,
         const PixelContext&         pixel_context,
         const ShadingContext&       shading_context,
@@ -83,7 +90,7 @@ class ShadingEngine
 
     void create_diagnostic_surface_shader(const ParamArray& params);
 
-    void shade_hit_point(
+    bool shade_hit_point(
         SamplingContext&            sampling_context,
         const PixelContext&         pixel_context,
         const ShadingContext&       shading_context,
@@ -105,7 +112,7 @@ class ShadingEngine
 // ShadingEngine class implementation.
 //
 
-inline void ShadingEngine::shade(
+inline bool ShadingEngine::shade(
     SamplingContext&            sampling_context,
     const PixelContext&         pixel_context,
     const ShadingContext&       shading_context,
@@ -115,7 +122,7 @@ inline void ShadingEngine::shade(
 {
     if (shading_point.hit_surface())
     {
-        shade_hit_point(
+        return shade_hit_point(
             sampling_context,
             pixel_context,
             shading_context,
@@ -132,6 +139,7 @@ inline void ShadingEngine::shade(
             shading_point,
             aov_accumulators,
             shading_result);
+        return true;
     }
 }
 

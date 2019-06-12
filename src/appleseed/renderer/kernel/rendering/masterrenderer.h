@@ -36,11 +36,12 @@
 #include "main/dllsymbol.h"
 
 // Forward declarations.
-namespace renderer  { class IRendererController; }
-namespace renderer  { class ITileCallback; }
-namespace renderer  { class ITileCallbackFactory; }
-namespace renderer  { class ParamArray; }
-namespace renderer  { class Project; }
+namespace foundation { class SearchPaths; }
+namespace renderer   { class IRendererController; }
+namespace renderer   { class ITileCallback; }
+namespace renderer   { class ITileCallbackFactory; }
+namespace renderer   { class ParamArray; }
+namespace renderer   { class Project; }
 
 namespace renderer
 {
@@ -53,19 +54,19 @@ class APPLESEED_DLLSYMBOL MasterRenderer
   : public foundation::NonCopyable
 {
   public:
-    // Constructor.
+    // Constructor taking a tile callback factory.
     MasterRenderer(
-        Project&                project,
-        const ParamArray&       params,
-        IRendererController*    renderer_controller,
-        ITileCallbackFactory*   tile_callback_factory = nullptr);
+        Project&                        project,
+        const ParamArray&               params,
+        const foundation::SearchPaths&  resource_search_paths,
+        ITileCallbackFactory*           tile_callback_factory = nullptr);
 
-    // Constructor for serial tile callbacks.
+    // Constructor taking a single tile callback (calls to it will be serialized).
     MasterRenderer(
-        Project&                project,
-        const ParamArray&       params,
-        IRendererController*    renderer_controller,
-        ITileCallback*          tile_callback);
+        Project&                        project,
+        const ParamArray&               params,
+        const foundation::SearchPaths&  resource_search_paths,
+        ITileCallback*                  tile_callback);
 
     // Destructor.
     ~MasterRenderer();
@@ -86,7 +87,7 @@ class APPLESEED_DLLSYMBOL MasterRenderer
     };
 
     // Render the project.
-    RenderingResult render();
+    RenderingResult render(IRendererController& renderer_controller);
 
   private:
     struct Impl;

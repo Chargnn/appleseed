@@ -32,13 +32,13 @@
 // appleseed.studio headers.
 #include "debug/benchmarks/benchmarkwindow.h"
 #include "debug/tests/testwindow.h"
+#include "mainwindow/applicationsettingswindow.h"
 #include "mainwindow/falsecolorswindow.h"
 #include "mainwindow/project/projectmanager.h"
 #include "mainwindow/qtlogtarget.h"
 #include "mainwindow/rendering/renderingmanager.h"
 #include "mainwindow/rendering/rendertab.h"
 #include "mainwindow/renderingsettingswindow.h"
-#include "mainwindow/settingswindow.h"
 #include "mainwindow/statusbar.h"
 
 // appleseed.renderer headers.
@@ -107,12 +107,13 @@ class MainWindow
     void on_project_change();
 
     ProjectManager* get_project_manager();
-    renderer::ParamArray& get_settings();
+    renderer::ParamArray& get_application_settings();
 
     QDockWidget* create_dock_widget(const char* dock_name);
 
   signals:
     void signal_refresh_attribute_editor(const foundation::Dictionary& values) const;
+    void signal_application_settings_modified() const;
 
   private:
     enum RenderingMode
@@ -136,6 +137,7 @@ class MainWindow
     QAction*                                    m_action_pause_resume_rendering;
     QAction*                                    m_action_stop_rendering;
     QAction*                                    m_action_rendering_settings;
+    QAction*                                    m_action_fullscreen;
 
     std::vector<QAction*>                       m_recently_opened;
     std::vector<MinimizeButton*>                m_minimize_buttons;
@@ -143,9 +145,9 @@ class MainWindow
     StatusBar                                   m_status_bar;
     std::unique_ptr<QtLogTarget>                m_log_target;
 
-    renderer::ParamArray                        m_settings;
+    renderer::ParamArray                        m_application_settings;
 
-    std::unique_ptr<SettingsWindow>             m_settings_window;
+    std::unique_ptr<ApplicationSettingsWindow>  m_application_settings_window;
     std::unique_ptr<RenderingSettingsWindow>    m_rendering_settings_window;
     std::unique_ptr<TestWindow>                 m_test_window;
     std::unique_ptr<BenchmarkWindow>            m_benchmark_window;
@@ -185,11 +187,11 @@ class MainWindow
     void update_pause_resume_checkbox(const bool checked);
 
     // Other UI elements.
+    void build_status_bar();
     void build_toolbar();
     void build_log_panel();
     void build_python_console_panel();
     void build_project_explorer();
-    void build_minimize_buttons();
     void build_connections();
 
     // UI state management.
@@ -234,7 +236,6 @@ class MainWindow
         renderer::Frame&                working_frame);
 
     // Miscellaneous.
-    void print_startup_information();
     void initialize_ocio();
     void closeEvent(QCloseEvent* event) override;
 
@@ -258,10 +259,10 @@ class MainWindow
     void slot_toggle_project_file_monitoring(const bool checked);
     void slot_project_file_changed(const QString& filepath);
 
-    // Settings I/O.
-    void slot_load_settings();
-    void slot_save_settings();
-    void slot_apply_settings();
+    // Application settings I/O.
+    void slot_load_application_settings();
+    void slot_save_application_settings();
+    void slot_apply_application_settings();
 
     // Rendering.
     void slot_start_interactive_rendering();
@@ -287,10 +288,10 @@ class MainWindow
 
     // Render widget actions.
     void slot_render_widget_context_menu(const QPoint& point);
-    void slot_save_raw_frame();
-    void slot_save_raw_frame_and_aovs();
-    void slot_quicksave_raw_frame_and_aovs();
-    void slot_save_post_processed_frame();
+    void slot_save_frame();
+    void slot_save_frame_and_aovs();
+    void slot_quicksave_frame_and_aovs();
+    void slot_save_render_widget_content();
     void slot_clear_frame();
     void slot_reset_zoom();
 
@@ -301,9 +302,10 @@ class MainWindow
 
     // General UI actions.
     void slot_fullscreen();
+    void slot_check_fullscreen();
 
     // Child windows.
-    void slot_show_settings_window();
+    void slot_show_application_settings_window();
     void slot_show_rendering_settings_window();
     void slot_show_test_window();
     void slot_show_benchmark_window();

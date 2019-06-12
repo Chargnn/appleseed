@@ -69,6 +69,7 @@
 #include "foundation/image/color.h"
 #include "foundation/image/image.h"
 #include "foundation/math/basis.h"
+#include "foundation/math/hash.h"
 #include "foundation/math/population.h"
 #include "foundation/math/sampling/mappings.h"
 #include "foundation/math/scalar.h"
@@ -265,9 +266,13 @@ namespace
                 return true;
             }
 
-            void on_scatter(PathVertex& vertex) {}
+            void on_scatter(PathVertex& vertex)
+            {
+            }
 
-            void visit_ray(PathVertex& vertex, const ShadingRay& volume_ray) {}
+            void visit_ray(PathVertex& vertex, const ShadingRay& volume_ray)
+            {
+            }
         };
 
         struct PathVisitor
@@ -494,7 +499,7 @@ namespace
                 emit_sample(sample_position, radiance);
             }
 
-            void on_scatter(const PathVertex& vertex)
+            void on_scatter(PathVertex& vertex)
             {
             }
 
@@ -507,6 +512,7 @@ namespace
                 const Color3f linear_rgb = radiance.to_rgb(g_std_lighting_conditions);
 
                 Sample sample;
+                sample.m_pixel_coords = m_frame.get_pixel_position(position_ndc);
                 sample.m_position = Vector2f(position_ndc);
                 sample.m_color = Color4f(linear_rgb, 1.0f);
                 m_samples.push_back(sample);
@@ -552,23 +558,24 @@ namespace
         {
             m_arena.clear();
 
+            // Create a sampling context.
+            const size_t instance = mix_uint32(m_frame.get_noise_seed(), static_cast<uint32>(sequence_index));
             SamplingContext sampling_context(
                 m_rng,
                 m_params.m_sampling_mode,
-                0,
-                sequence_index,
-                sequence_index);
+                instance);
 
             size_t stored_sample_count = 0;
 
+            // Trace one path from one of the lights.
             if (m_light_sampler.has_lights())
                 stored_sample_count += generate_light_sample(sampling_context, samples);
 
+            // Trace one path from the environment.
             if (m_params.m_enable_ibl)
             {
                 const EnvironmentEDF* env_edf = m_scene.get_environment()->get_environment_edf();
-
-                if (env_edf)
+                if (env_edf != nullptr)
                 {
                     stored_sample_count +=
                         generate_environment_sample(sampling_context, env_edf, samples);
@@ -597,12 +604,12 @@ namespace
                 light_sample);
 
             return
-                light_sample.m_triangle
-                    ? generate_emitting_triangle_sample(sampling_context, light_sample, samples)
+                light_sample.m_shape
+                    ? generate_emitting_shape_sample(sampling_context, light_sample, samples)
                     : generate_non_physical_light_sample(sampling_context, light_sample, samples);
         }
 
-        size_t generate_emitting_triangle_sample(
+        size_t generate_emitting_shape_sample(
             SamplingContext&            sampling_context,
             LightSample&                light_sample,
             SampleVector&               samples)
@@ -613,7 +620,7 @@ namespace
                     light_sample.m_geometric_normal,
                     light_sample.m_shading_normal);
 
-            const Material* material = light_sample.m_triangle->m_material;
+            const Material* material = light_sample.m_shape->get_material();
             const Material::RenderData& material_data = material->get_render_data();
 
             // Build a shading point on the light source.
@@ -944,8 +951,7 @@ SampleAccumulationBuffer* LightTracingSampleGeneratorFactory::create_sample_accu
     return
         new GlobalSampleAccumulationBuffer(
             props.m_canvas_width,
-            props.m_canvas_height,
-            m_frame.get_filter());
+            props.m_canvas_height);
 }
 
 }   // namespace renderer

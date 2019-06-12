@@ -65,7 +65,7 @@ class Vector
     static const size_t Dimension = N;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Vector() = default;                         // leave all components uninitialized
 #else
     Vector() {}                                 // leave all components uninitialized
@@ -252,7 +252,7 @@ class Vector<T, 2>
     ValueType x, y;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Vector() = default;                         // leave all components uninitialized
 #else
     Vector() {}                                 // leave all components uninitialized
@@ -308,7 +308,7 @@ class Vector<T, 3>
     ValueType x, y, z;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Vector() = default;                         // leave all components uninitialized
 #else
     Vector() {}                                 // leave all components uninitialized
@@ -375,7 +375,7 @@ class Vector<T, 4>
     ValueType x, y, z, w;
 
     // Constructors.
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
+#if APPLESEED_COMPILER_CXX_DEFAULTED_FUNCTIONS
     Vector() = default;                         // leave all components uninitialized
 #else
     Vector() {}                                 // leave all components uninitialized
@@ -499,7 +499,7 @@ template <typename T, size_t N>
 void PoisonImpl<Vector<T, N>>::do_poison(Vector<T, N>& v)
 {
     for (size_t i = 0; i < N; ++i)
-        poison(v[i]);
+        always_poison(v[i]);
 }
 
 template <typename T, size_t N>

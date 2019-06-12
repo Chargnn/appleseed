@@ -34,8 +34,8 @@
 #include "renderer/kernel/lighting/backwardlightsampler.h"
 #include "renderer/kernel/lighting/pt/ptlightingengine.h"
 #include "renderer/kernel/lighting/sppm/sppmlightingengine.h"
-#include "renderer/kernel/rendering/final/adaptivepixelrenderer.h"
 #include "renderer/kernel/rendering/final/adaptivetilerenderer.h"
+#include "renderer/kernel/rendering/final/texturecontrolledpixelrenderer.h"
 #include "renderer/kernel/rendering/final/uniformpixelrenderer.h"
 #include "renderer/kernel/rendering/generic/genericframerenderer.h"
 #include "renderer/kernel/rendering/progressive/progressiveframerenderer.h"
@@ -69,67 +69,48 @@ UniqueID Configuration::get_class_uid()
     return g_class_uid;
 }
 
-Configuration::Configuration(const char* name)
-  : Entity(g_class_uid)
-  , m_base(nullptr)
-{
-    set_name(name);
-}
-
-void Configuration::release()
-{
-    delete this;
-}
-
-void Configuration::set_base(const Configuration* base)
-{
-    m_base = base;
-}
-
-const Configuration* Configuration::get_base() const
-{
-    return m_base;
-}
-
-ParamArray Configuration::get_inherited_parameters() const
-{
-    if (m_base)
-    {
-        ParamArray params = m_base->m_params;
-        params.merge(m_params);
-        return params;
-    }
-    else
-    {
-        return m_params;
-    }
-}
-
 Dictionary Configuration::get_metadata()
 {
     Dictionary metadata;
 
     metadata.insert(
+        "device",
+        Dictionary()
+            .insert("type", "enum")
+            .insert("values", "cpu")
+            .insert("default", "cpu")
+            .insert("label", "Device")
+            .insert("help", "Render device")
+            .insert(
+                "options",
+                Dictionary()
+                    .insert(
+                        "cpu",
+                        Dictionary()
+                            .insert("label", "CPU")
+                            .insert("help", "CPU device"))));
+
+    metadata.insert(
         "spectrum_mode",
         Dictionary()
-        .insert("type", "enum")
-        .insert("values", "rgb|spectral")
-        .insert("default", "rgb")
-        .insert("label", "Color Pipeline")
-        .insert("help", "Color pipeline used throughout the renderer")
-        .insert(
-            "options",
-            Dictionary()
+            .insert("type", "enum")
+            .insert("values", "rgb|spectral")
+            .insert("default", "rgb")
+            .insert("label", "Color Pipeline")
+            .insert("help", "Color pipeline used throughout the renderer")
             .insert(
-                "rgb",
+                "options",
                 Dictionary()
-                .insert("label", "RGB")
-                .insert("help", "RGB pipeline"))
-            .insert(
-                "spectral",
-                Dictionary()
-                .insert("label", "Spectral")
-                .insert("help", "Spectral pipeline using 31 equidistant components in the 400-700 nm range"))));
+                .insert(
+                    "rgb",
+                    Dictionary()
+                        .insert("label", "RGB")
+                        .insert("help", "RGB pipeline"))
+                .insert(
+                    "spectral",
+                    Dictionary()
+                        .insert("label", "Spectral")
+                        .insert("help", "Spectral pipeline using 31 equidistant components in the 400-700 nm range"))));
 
     metadata.insert(
         "sampling_mode",
@@ -200,7 +181,7 @@ Dictionary Configuration::get_metadata()
             .insert("help", "Whether to use Embree ray tracing kernels or appleseed internal ones"));
 
 #endif
-    
+
     metadata.dictionaries().insert(
         "light_sampler",
         BackwardLightSampler::get_params_metadata());
@@ -214,8 +195,8 @@ Dictionary Configuration::get_metadata()
         UniformPixelRendererFactory::get_params_metadata());
 
     metadata.dictionaries().insert(
-        "adaptive_pixel_renderer",
-        AdaptivePixelRendererFactory::get_params_metadata());
+        "texture_controlled_pixel_renderer",
+        TextureControlledPixelRendererFactory::get_params_metadata());
 
     metadata.dictionaries().insert(
         "adaptive_tile_renderer",
@@ -229,10 +210,51 @@ Dictionary Configuration::get_metadata()
         "progressive_frame_renderer",
         ProgressiveFrameRendererFactory::get_params_metadata());
 
-    metadata.dictionaries().insert("pt", PTLightingEngineFactory::get_params_metadata());
-    metadata.dictionaries().insert("sppm", SPPMLightingEngineFactory::get_params_metadata());
+    metadata.dictionaries().insert(
+        "pt",
+        PTLightingEngineFactory::get_params_metadata());
+
+    metadata.dictionaries().insert(
+        "sppm",
+        SPPMLightingEngineFactory::get_params_metadata());
 
     return metadata;
+}
+
+Configuration::Configuration(const char* name)
+  : Entity(g_class_uid)
+  , m_base(nullptr)
+{
+    set_name(name);
+}
+
+void Configuration::release()
+{
+    delete this;
+}
+
+void Configuration::set_base(const Configuration* base)
+{
+    m_base = base;
+}
+
+const Configuration* Configuration::get_base() const
+{
+    return m_base;
+}
+
+ParamArray Configuration::get_inherited_parameters() const
+{
+    if (m_base)
+    {
+        ParamArray params = m_base->m_params;
+        params.merge(m_params);
+        return params;
+    }
+    else
+    {
+        return m_params;
+    }
 }
 
 
@@ -299,8 +321,6 @@ auto_release_ptr<Configuration> BaseConfigurationFactory::create_base_interactiv
 
     parameters.insert("spectrum_mode", "rgb");
     parameters.insert("sampling_mode", "qmc");
-
-    parameters.insert("passes", 1);
 
     parameters.insert("frame_renderer", "progressive");
     parameters.insert("sample_generator", "generic");

@@ -37,6 +37,7 @@
 #include "foundation/platform/types.h"
 
 // Standard headers.
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -53,6 +54,7 @@ namespace foundation
 // Constants.
 //
 
+// Mathematical constants.
 template <typename T> inline T Pi()                 { return static_cast<T>(3.1415926535897932); }
 template <typename T> inline T TwoPi()              { return static_cast<T>(6.2831853071795865); }  // 2 * Pi
 template <typename T> inline T FourPi()             { return static_cast<T>(12.566370614359173); }  // 4 * Pi
@@ -75,6 +77,70 @@ template <typename T> inline T RcpSqrtTwo()         { return static_cast<T>(0.70
 template <typename T> inline T SqrtThree()          { return static_cast<T>(1.7320508075688773); }  // sqrt(3)
 template <typename T> inline T GoldenRatio()        { return static_cast<T>(1.6180339887498948); }  // (1 + sqrt(5)) / 2
 template <typename T> inline T Ln10()               { return static_cast<T>(2.3025850929940457); }  // ln(10)
+
+//
+// The four floating point constants below were determined with the following program:
+//
+//   #include <cmath>
+//   #include <cstdint>
+//   #include <iomanip>
+//   #include <iostream>
+//   #include <limits>
+//
+//   template <typename Target, typename Source>
+//   Target binary_cast(Source s)
+//   {
+//       union { Source m_source; Target m_target; } u;
+//       u.m_source = s;
+//       return u.m_target;
+//   }
+//
+//   template <typename Float, typename UInt>
+//   Float compute_rcp_power_of_two()
+//   {
+//       Float x = std::pow(Float(2.0), std::numeric_limits<UInt>::digits);
+//
+//       while (true)
+//       {
+//           const Float rcp_x = Float(1.0) / x;
+//
+//           if (std::numeric_limits<UInt>::max() * rcp_x < Float(1.0))
+//               return rcp_x;
+//
+//           const UInt x_bits = binary_cast<UInt>(x);
+//           x = binary_cast<Float>(x_bits + 1);
+//       }
+//   }
+//
+//   int main()
+//   {
+//       std::cout << std::setprecision(9) << compute_rcp_power_of_two<float, std::uint32_t>() << std::endl;
+//       std::cout << std::setprecision(17) << compute_rcp_power_of_two<double, std::uint32_t>() << std::endl;
+//       std::cout << std::setprecision(9) << compute_rcp_power_of_two<float, std::uint64_t>() << std::endl;
+//       std::cout << std::setprecision(17) << compute_rcp_power_of_two<double, std::uint64_t>() << std::endl;
+//   }
+//
+// Run this code on Coliru:
+//
+//   http://coliru.stacked-crooked.com/a/05d58a1b19118b8e
+//
+// Output:
+//
+//   2.32830616e-10
+//   2.3283064365386963e-10
+//   5.42101022e-20
+//   5.421010862427521e-20
+//
+
+// Return a constant that, when multiplied by 2^32 - 1 (0xFFFFFFFF), equals the largest value strictly smaller than 1.0.
+template <typename T> inline T Rcp2Pow32();
+template <> inline float Rcp2Pow32<float>()         { return 2.32830616e-10f; }
+template <> inline double Rcp2Pow32<double>()       { return 2.3283064365386963e-10; }
+
+// Return a constant that, when multiplied by 2^64 - 1 (0xFFFFFFFFFFFFFFFF), equals the largest value strictly smaller than 1.0.
+template <typename T> inline T Rcp2Pow64();
+template <> inline float Rcp2Pow64<float>()         { return 5.42101022e-20f; }
+template <> inline double Rcp2Pow64<double>()       { return 5.421010862427521e-20; }
 
 
 //
@@ -111,6 +177,14 @@ T cube(const T x);
 // Return 1 / x.
 template <typename T>
 T rcp(const T x);
+
+// Return 1 / x or eps if the absolute value of x is less than eps.
+template <typename T>
+T safe_rcp(const T x, const T eps);
+
+// Return the square root of x or 0 if x is negative.
+template <typename T>
+T safe_sqrt(const T x);
 
 // Compile-time exponentiation of the form x^p where p >= 0.
 // Note: swapped template arguments to allow writing pow_int<3>(3.14).
@@ -178,6 +252,11 @@ T normalize_angle(const T angle);
 template <typename Int, typename T>
 Int truncate(const T x);
 
+// Round x to the nearest integer with Round Half Away from Zero tie breaking rule.
+// Reference: http://en.wikipedia.org/wiki/Rounding#Round_half_away_from_zero.
+template <typename Int, typename T>
+Int round(const T x);
+
 // Semantically identical to std::floor().
 template <typename T>
 T fast_floor(const T x);
@@ -186,14 +265,17 @@ T fast_floor(const T x);
 template <typename T>
 T fast_ceil(const T x);
 
+// Return the fractional part of x, defined as x - std::floor(x).
+// The returned value is always in [0, 1) even when x is negative.
+// Passing negative values to this function may give surprising results,
+// e.g. frac(-4.2) will return 0.8. You may want to use frac(std::abs(x))
+// which for x = -4.2 will return 0.2.
+template <typename T>
+T frac(const T x);
+
 // Return the integer and fractional parts of x.
 template <typename T, typename I>
 T floor_frac(const T x, I& int_part);
-
-// Round x to the nearest integer with Round Half Away from Zero tie breaking rule.
-// Reference: http://en.wikipedia.org/wiki/Rounding#Round_half_away_from_zero.
-template <typename Int, typename T>
-Int round(const T x);
 
 // Compute a % n or fmod(a, n) and always return a non-negative value.
 template <typename T>
@@ -235,20 +317,13 @@ T inverse_lerp(const T a, const T b, const U x);
 // fit() remaps a variable x from the range [min_x, max_x] to the
 // range [min_y, max_y]. When x is outside the [min_x, max_x] range,
 // a linear extrapolation outside the [min_y, max_y] range is used.
-template <typename T>
-T fit(
-    const T x,
-    const T min_x,
-    const T max_x,
-    const T min_y,
-    const T max_y);
-template <typename U, typename V>
-V fit(
-    const U x,
-    const U min_x,
-    const U max_x,
-    const V min_y,
-    const V max_y);
+template <typename In, typename Out = In, typename Interpolant = Out>
+Out fit(
+    const In x,
+    const In min_x,
+    const In max_x,
+    const Out min_y,
+    const Out max_y);
 
 
 //
@@ -359,6 +434,18 @@ template <typename T>
 inline T rcp(const T x)
 {
     return T(1.0) / x;
+}
+
+template <typename T>
+inline T safe_rcp(const T x, const T eps)
+{
+    return std::abs(x) < eps ? eps : T(1.0) / x;
+}
+
+template <typename T>
+inline T safe_sqrt(const T x)
+{
+    return std::sqrt(std::max(x, T(0.0)));
 }
 
 template <typename T, size_t P>
@@ -660,6 +747,12 @@ inline int64 truncate<int64>(const double x)
 
 #endif
 
+template <typename Int, typename T>
+inline Int round(const T x)
+{
+    return truncate<Int>(x < T(0.0) ? x - T(0.5) : x + T(0.5));
+}
+
 template <typename T>
 inline T fast_floor(const T x)
 {
@@ -670,14 +763,6 @@ template <typename T>
 inline T fast_ceil(const T x)
 {
     return std::ceil(x);
-}
-
-template <typename T, typename I>
-inline T floor_frac(const T x, I& int_part)
-{
-    const T f = fast_floor(x);
-    int_part = static_cast<I>(f);
-    return x - f;
 }
 
 #ifdef APPLESEED_USE_SSE42
@@ -716,10 +801,26 @@ inline double fast_ceil(const double x)
 
 #endif
 
-template <typename Int, typename T>
-inline Int round(const T x)
+template <typename T>
+inline T frac(const T x)
 {
-    return truncate<Int>(x < T(0.0) ? x - T(0.5) : x + T(0.5));
+    const T f = x - fast_floor(x);
+    assert(f >= T(0.0));
+    assert(f < T(1.0));
+    return f;
+}
+
+template <typename T, typename I>
+inline T floor_frac(const T x, I& int_part)
+{
+    const T f = fast_floor(x);
+    int_part = static_cast<I>(f);
+
+    const T frac_part = x - f;
+    assert(frac_part >= T(0.0));
+    assert(frac_part < T(1.0));
+
+    return frac_part;
 }
 
 template <typename T>
@@ -839,38 +940,21 @@ template <typename T, typename U>
 inline T inverse_lerp(const T a, const T b, const U x)
 {
     assert(a != b);
-
     return (x - a) / (b - a);
 }
 
-template <typename T>
-inline T fit(
-    const T x,
-    const T min_x,
-    const T max_x,
-    const T min_y,
-    const T max_y)
+template <typename In, typename Out, typename Interpolant>
+inline Out fit(
+    const In x,
+    const In min_x,
+    const In max_x,
+    const Out min_y,
+    const Out max_y)
 {
     assert(min_x != max_x);
-
-    const T k = (x - min_x) / (max_x - min_x);
-
-    return min_y * (T(1.0) - k) + max_y * k;
-}
-
-template <typename U, typename V>
-inline V fit(
-    const U x,
-    const U min_x,
-    const U max_x,
-    const V min_y,
-    const V max_y)
-{
-    assert(min_x != max_x);
-
-    const V k = static_cast<V>(x - min_x) / (max_x - min_x);
-
-    return min_y * (V(1.0) - k) + max_y * k;
+    const Interpolant k = Interpolant(x - min_x) / Interpolant(max_x - min_x);
+    const Out result = min_y * (Interpolant(1.0) - k) + max_y * k;
+    return result;
 }
 
 

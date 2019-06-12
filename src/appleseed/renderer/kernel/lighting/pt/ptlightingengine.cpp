@@ -162,7 +162,7 @@ namespace
             const ShadingContext&   shading_context,
             const ShadingPoint&     shading_point,
             ShadingComponents&      radiance,               // output radiance, in W.sr^-1.m^-2
-            AOVComponents&          components) override      
+            AOVComponents&          aov_components) override
         {
             if (m_light_path_stream)
             {
@@ -179,7 +179,7 @@ namespace
                     shading_context,
                     shading_point,
                     radiance,
-                    components);
+                    aov_components);
             }
             else
             {
@@ -188,7 +188,7 @@ namespace
                     shading_context,
                     shading_point,
                     radiance,
-                    components);
+                    aov_components);
             }
 
             if (m_light_path_stream)
@@ -201,7 +201,7 @@ namespace
             const ShadingContext&   shading_context,
             const ShadingPoint&     shading_point,
             ShadingComponents&      radiance,               // output radiance, in W.sr^-1.m^-2
-            AOVComponents&          components)               
+            AOVComponents&          aov_components)
         {
             PathVisitor path_visitor(
                 m_params,
@@ -210,7 +210,7 @@ namespace
                 shading_context,
                 shading_point.get_scene(),
                 radiance,
-                components,
+                aov_components,
                 m_light_path_stream);
 
             VolumeVisitor volume_visitor(
@@ -393,7 +393,7 @@ namespace
                 const ShadingContext&           shading_context,
                 const Scene&                    scene,
                 ShadingComponents&              path_radiance,
-                AOVComponents&                  components,
+                AOVComponents&                  aov_components,
                 LightPathStream*                light_path_stream)
               : m_params(params)
               , m_light_sampler(light_sampler)
@@ -401,7 +401,7 @@ namespace
               , m_shading_context(shading_context)
               , m_env_edf(scene.get_environment()->get_environment_edf())
               , m_path_radiance(path_radiance)
-              , m_aov_components(components)
+              , m_aov_components(aov_components)
               , m_light_path_stream(light_path_stream)
               , m_omit_emitted_light(false)
             {
@@ -423,7 +423,7 @@ namespace
                 const ShadingContext&           shading_context,
                 const Scene&                    scene,
                 ShadingComponents&              path_radiance,
-                AOVComponents&                  components,
+                AOVComponents&                  aov_components,
                 LightPathStream*                light_path_stream)
               : PathVisitorBase(
                     params,
@@ -432,7 +432,7 @@ namespace
                     shading_context,
                     scene,
                     path_radiance,
-                    components,
+                    aov_components,
                     light_path_stream)
             {
             }
@@ -504,15 +504,12 @@ namespace
             {
                 // When caustics are disabled, disable glossy and specular components after a diffuse or volume bounce.
                 // Note that accept_scattering() is later going to return false in this case.
-                const bool has_diffuse_or_volume_scattering =
-                    vertex.m_prev_mode == ScatteringMode::Diffuse ||
-                    vertex.m_prev_mode == ScatteringMode::Volume;
-                if (!m_params.m_enable_caustics && has_diffuse_or_volume_scattering)
-                    vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
-
-                // Terminate the path if all scattering modes are disabled.
-                if (vertex.m_scattering_modes == ScatteringMode::None)
-                    return;
+                if (!m_params.m_enable_caustics)
+                {
+                    if (vertex.m_prev_mode == ScatteringMode::Diffuse ||
+                        vertex.m_prev_mode == ScatteringMode::Volume)
+                        vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
+                }
             }
         };
 
@@ -531,7 +528,7 @@ namespace
                 const ShadingContext&           shading_context,
                 const Scene&                    scene,
                 ShadingComponents&              path_radiance,
-                AOVComponents&                  components,
+                AOVComponents&                  aov_components,
                 LightPathStream*                light_path_stream)
               : PathVisitorBase(
                     params,
@@ -540,7 +537,7 @@ namespace
                     shading_context,
                     scene,
                     path_radiance,
-                    components,
+                    aov_components,
                     light_path_stream)
               , m_is_indirect_lighting(false)
             {
@@ -569,7 +566,7 @@ namespace
 
                 // This may happen for points of the environment map with infinite components,
                 // which are then excluded from importance sampling and thus have zero weight.
-                if (env_prob == 0.0)
+                if (env_prob == 0.0f)
                     return;
 
                 // Multiple importance sampling.
@@ -588,7 +585,7 @@ namespace
                 env_radiance *= vertex.m_throughput;
 
                 // Optionally clamp secondary rays contribution.
-                if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1)
+                if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1 && vertex.m_prev_mode != ScatteringMode::Specular)
                     clamp_contribution(env_radiance, m_params.m_max_ray_intensity);
 
                 // Update path radiance.
@@ -619,7 +616,7 @@ namespace
                     emitted_radiance *= vertex.m_throughput;
 
                     // Optionally clamp secondary rays contribution.
-                    if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1)
+                    if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1 && vertex.m_prev_mode != ScatteringMode::Specular)
                         clamp_contribution(emitted_radiance, m_params.m_max_ray_intensity);
 
                     // Update path radiance.
@@ -645,11 +642,12 @@ namespace
                     m_is_indirect_lighting = true;
 
                 // When caustics are disabled, disable glossy and specular components after a diffuse or volume bounce.
-                const bool has_diffuse_or_volume_scattering =
-                    vertex.m_prev_mode == ScatteringMode::Diffuse ||
-                    vertex.m_prev_mode == ScatteringMode::Volume;
-                if (!m_params.m_enable_caustics && has_diffuse_or_volume_scattering)
-                    vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
+                if (!m_params.m_enable_caustics)
+                {
+                    if (vertex.m_prev_mode == ScatteringMode::Diffuse ||
+                        vertex.m_prev_mode == ScatteringMode::Volume)
+                        vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
+                }
 
                 // Terminate the path if all scattering modes are disabled.
                 if (vertex.m_scattering_modes == ScatteringMode::None)
@@ -704,7 +702,8 @@ namespace
                             *vertex.m_bsdf,
                             vertex.m_bsdf_data,
                             vertex.m_scattering_modes,
-                            vertex_radiance);
+                            vertex_radiance,
+                            m_light_path_stream);
                     }
                 }
 
@@ -712,7 +711,7 @@ namespace
                 vertex_radiance *= vertex.m_throughput;
 
                 // Optionally clamp secondary rays contribution.
-                if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1)
+                if (m_params.m_has_max_ray_intensity && vertex.m_path_length > 1 && vertex.m_prev_mode != ScatteringMode::Specular)
                     clamp_contribution(vertex_radiance, m_params.m_max_ray_intensity);
 
                 // Update path radiance.
@@ -805,7 +804,8 @@ namespace
                 const BSDF&                 bsdf,
                 const void*                 bsdf_data,
                 const int                   scattering_modes,
-                DirectShadingComponents&    vertex_radiance)
+                DirectShadingComponents&    vertex_radiance,
+                LightPathStream*            light_path_stream)
             {
                 DirectShadingComponents ibl_radiance;
 
@@ -830,7 +830,8 @@ namespace
                     scattering_modes,
                     1,                      // bsdf_sample_count
                     env_sample_count,
-                    ibl_radiance);
+                    ibl_radiance,
+                    light_path_stream);
 
                 // Divide by the sample count when this number is less than 1.
                 if (m_params.m_rcp_ibl_env_sample_count > 0.0f)
@@ -857,11 +858,12 @@ namespace
             {
                 // When caustics are disabled, disable glossy and specular components after a diffuse or volume bounce.
                 // Note that accept_scattering() is later going to return false in this case.
-                const bool has_diffuse_or_volume_scattering =
-                    vertex.m_prev_mode == ScatteringMode::Diffuse ||
-                    vertex.m_prev_mode == ScatteringMode::Volume;
-                if (!m_params.m_enable_caustics && has_diffuse_or_volume_scattering)
-                    vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
+                if (!m_params.m_enable_caustics)
+                {
+                    if (vertex.m_prev_mode == ScatteringMode::Diffuse ||
+                        vertex.m_prev_mode == ScatteringMode::Volume)
+                        vertex.m_scattering_modes &= ~(ScatteringMode::Glossy | ScatteringMode::Specular);
+                }
             }
 
           protected:
@@ -1052,34 +1054,9 @@ namespace
 // PTLightingEngineFactory class implementation.
 //
 
-PTLightingEngineFactory::PTLightingEngineFactory(
-    const BackwardLightSampler&     light_sampler,
-    LightPathRecorder&              light_path_recorder,
-    const ParamArray&               params)
-  : m_light_sampler(light_sampler)
-  , m_light_path_recorder(light_path_recorder)
-  , m_params(params)
-{
-}
-
-void PTLightingEngineFactory::release()
-{
-    delete this;
-}
-
-ILightingEngine* PTLightingEngineFactory::create()
-{
-    return
-        new PTLightingEngine(
-            m_light_sampler,
-            m_light_path_recorder,
-            m_params);
-}
-
 Dictionary PTLightingEngineFactory::get_params_metadata()
 {
     Dictionary metadata;
-    add_common_params_metadata(metadata, true);
 
     metadata.dictionaries().insert(
         "enable_dl",
@@ -1088,6 +1065,14 @@ Dictionary PTLightingEngineFactory::get_params_metadata()
             .insert("default", "true")
             .insert("label", "Enable Direct Lighting")
             .insert("help", "Enable direct lighting"));
+
+    metadata.dictionaries().insert(
+        "enable_ibl",
+        Dictionary()
+            .insert("type", "bool")
+            .insert("default", "on")
+            .insert("label", "Enable IBL")
+            .insert("help", "Enable image-based lighting"));
 
     metadata.dictionaries().insert(
         "enable_caustics",
@@ -1165,6 +1150,30 @@ Dictionary PTLightingEngineFactory::get_params_metadata()
             .insert("help", "Explicitly connect path vertices to light sources to improve efficiency"));
 
     metadata.dictionaries().insert(
+        "dl_light_samples",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "1.0")
+            .insert("label", "Light Samples")
+            .insert("help", "Number of samples used to estimate direct lighting"));
+
+    metadata.dictionaries().insert(
+        "dl_low_light_threshold",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "0.0")
+            .insert("label", "Low Light Threshold")
+            .insert("help", "Light contribution threshold to disable shadow rays"));
+
+    metadata.dictionaries().insert(
+        "ibl_env_samples",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "1.0")
+            .insert("label", "IBL Samples")
+            .insert("help", "Number of samples used to estimate environment lighting"));
+
+    metadata.dictionaries().insert(
         "clamp_roughness",
         Dictionary()
             .insert("type", "bool")
@@ -1209,6 +1218,30 @@ Dictionary PTLightingEngineFactory::get_params_metadata()
             .insert("help", "Record light paths in memory to later allow visualizing them or saving them to disk"));
 
     return metadata;
+}
+
+PTLightingEngineFactory::PTLightingEngineFactory(
+    const BackwardLightSampler&     light_sampler,
+    LightPathRecorder&              light_path_recorder,
+    const ParamArray&               params)
+  : m_light_sampler(light_sampler)
+  , m_light_path_recorder(light_path_recorder)
+  , m_params(params)
+{
+}
+
+void PTLightingEngineFactory::release()
+{
+    delete this;
+}
+
+ILightingEngine* PTLightingEngineFactory::create()
+{
+    return
+        new PTLightingEngine(
+            m_light_sampler,
+            m_light_path_recorder,
+            m_params);
 }
 
 }   // namespace renderer

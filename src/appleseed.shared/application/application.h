@@ -38,10 +38,12 @@
 // Boost headers.
 #include "boost/filesystem/operations.hpp"
 #include "boost/filesystem/path.hpp"
+#include "boost/system/error_code.hpp"
 
 // Forward declarations.
 namespace foundation    { class Dictionary; }
 namespace foundation    { class Logger; }
+namespace foundation    { class SearchPaths; }
 
 namespace appleseed {
 namespace shared {
@@ -68,28 +70,52 @@ class SHAREDDLL Application
     // a fatal error message through the provided foundation::Logger object.
     static void check_installation(foundation::Logger& logger);
 
-    // Return the root path of the application. The root path of an application
-    // is the path to the parent of the bin/ subdirectory. This method returns
-    // an empty string if the application is not correctly installed.
+    // Return the root path of the application.
+    // This is the path to the parent of the bin/ directory.
+    // Returns nullptr if the application is not correctly installed.
     static const char* get_root_path();
 
     // Return the user settings path.
+    // Returns nullptr if the notion of user settings path is not supported on this platform.
     static const char* get_user_settings_path();
 
-    // Return the root path of the application's tests.
+    // Return the root path of the application's tests (unit tests, unit benchmarks, etc.).
+    // On a developer's machine, this is path/to/appleseed/sandbox/tests/.
+    // Returns nullptr if the application is not correctly installed.
     static const char* get_tests_root_path();
 
+    // Return the output path of the application's unit tests.
+    // On a developer's machine, this is path/to/appleseed/sandbox/tests/unit tests/outputs/.
+    // Returns nullptr if the application is not correctly installed.
+    static const char* get_unit_tests_output_path();
+
     // Load a settings file from appleseed's settings directory.
-    // Returns true if settings could be loaded.
+    // Returns true if settings could be loaded, false otherwise.
     static bool load_settings(
         const char*                             filename,
         foundation::Dictionary&                 settings,
         foundation::Logger&                     logger,
         const foundation::LogMessage::Category  category = foundation::LogMessage::Debug);
 
+    // Save settings to a settings file in appleseed's settings directory.
+    // Returns true if settings could be saved, false otherwise.
+    static bool save_settings(
+        const char*                             filename,
+        const foundation::Dictionary&           settings,
+        foundation::Logger&                     logger,
+        const foundation::LogMessage::Category  category = foundation::LogMessage::Debug);
+
+    // Initialize resource search paths (currently path to OSL headers).
+    static void initialize_resource_search_paths(
+        foundation::SearchPaths&                search_paths);
+
     // Change the current directory to the root path of the application's tests.
     // Returns the path to the current directory.
     static boost::filesystem::path change_current_directory_to_tests_root_path();
+
+    // Create output directories for the application's unit tests.
+    // Returns true on success, false otherwise.
+    static bool create_unit_tests_output_directories();
 };
 
 
@@ -99,14 +125,18 @@ class SHAREDDLL Application
 
 inline boost::filesystem::path Application::change_current_directory_to_tests_root_path()
 {
-    using namespace boost;
+    namespace bf = boost::filesystem;
 
-    const filesystem::path old_current_path = filesystem::current_path();
-
-    const filesystem::path tests_root_path(Application::get_tests_root_path());
-    filesystem::current_path(tests_root_path);
-
+    const bf::path old_current_path = bf::current_path();
+    bf::current_path(get_tests_root_path());
     return old_current_path;
+}
+
+inline bool Application::create_unit_tests_output_directories()
+{
+    boost::system::error_code ec;
+    boost::filesystem::create_directories(get_unit_tests_output_path(), ec);
+    return !ec;
 }
 
 }   // namespace shared

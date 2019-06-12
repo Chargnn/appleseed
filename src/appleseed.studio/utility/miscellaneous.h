@@ -35,6 +35,7 @@
 
 // Forward declarations.
 namespace renderer  { class ParamArray; }
+class QByteArray;
 class QIcon;
 class QLayout;
 class QMessageBox;
@@ -46,9 +47,6 @@ class QWidget;
 namespace appleseed {
 namespace studio {
 
-// File dialog filter string for bitmap files supported by appleseed's own image subsystem.
-extern const QString g_appleseed_image_files_filter;
-
 // File dialog filter string for bitmap files supported by Qt.
 extern const QString g_qt_image_files_filter;
 
@@ -57,13 +55,13 @@ QString get_oiio_image_files_filter();
 
 enum ProjectFilesFilter
 {
-    ProjectFilesFilterAllProjects       = 1 << 0,   // all project files extensions
-    ProjectFilesFilterPlainProjects     = 1 << 1,   // .appleseed extension
-    ProjectFilesFilterPackedProjects    = 1 << 2,   // .appleseedz extension
+    ProjectFilesFilterAllProjects       = 1UL << 0,     // all project files extensions
+    ProjectFilesFilterPlainProjects     = 1UL << 1,     // .appleseed extension
+    ProjectFilesFilterPackedProjects    = 1UL << 2,     // .appleseedz extension
     ProjectFilesFilterDefault           =
-        ProjectFilesFilterAllProjects |
-        ProjectFilesFilterPlainProjects |
-        ProjectFilesFilterPackedProjects
+          ProjectFilesFilterAllProjects
+        | ProjectFilesFilterPlainProjects
+        | ProjectFilesFilterPackedProjects
 };
 
 // Return a file dialog filter string for appleseed projects.
@@ -81,6 +79,9 @@ QString combine_name_and_shortcut(const QString& name, const QKeySequence& short
 
 // Check whether a file exists.
 bool file_exists(const QString& path);
+
+// Load a GLSL shader from file into a QByteArray.
+QByteArray load_gl_shader(const QString& base_name);
 
 // Load an icon and its variants (hover, disabled...) from the application's icons directory.
 QIcon load_icons(const QString& base_name);
@@ -117,7 +118,7 @@ void set_minimum_width(QMessageBox& msgbox, const int minimum_width);
 
 // Create a keyboard shortcut that is active for a given window and its
 // child widgets, but not for its top-level children like subwindows.
-QShortcut* create_window_local_shortcut(QWidget* parent, const int key);
+QShortcut* create_window_local_shortcut(QWidget* parent, const QKeySequence key_sequence);
 
 // Remove all widgets and sub-layouts from a layout.
 void clear_layout(QLayout* layout);

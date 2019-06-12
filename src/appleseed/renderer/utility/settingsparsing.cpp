@@ -48,6 +48,20 @@ using namespace std;
 namespace renderer
 {
 
+string get_render_device(const ParamArray& params)
+{
+    std::vector<std::string> devices;
+    devices.emplace_back("cpu");
+
+    const string device =
+        params.get_optional<string>(
+            "device",
+            "cpu",
+            devices);
+
+    return device;
+}
+
 Spectrum::Mode get_spectrum_mode(const ParamArray& params)
 {
     const string spectrum_mode =
@@ -56,20 +70,35 @@ Spectrum::Mode get_spectrum_mode(const ParamArray& params)
             "rgb",
             make_vector("rgb", "spectral"));
 
+#ifdef APPLESEED_WITH_SPECTRAL_SUPPORT
     return
         spectrum_mode == "rgb"
             ? Spectrum::RGB
             : Spectrum::Spectral;
+#else
+    if (spectrum_mode == "spectral")
+    {
+        RENDERER_LOG_WARNING(
+            "color pipeline set the \"spectral\" but spectral color support "
+            "was not enabled when building appleseed; rgb will be used instead");
+    }
+
+    return Spectrum::RGB;
+#endif
 }
 
 string get_spectrum_mode_name(const Spectrum::Mode mode)
 {
+#ifdef APPLESEED_WITH_SPECTRAL_SUPPORT
     switch (mode)
     {
       case Spectrum::RGB: return "rgb";
       case Spectrum::Spectral: return "spectral";
       default: return "unknown";
     }
+#else
+    return "rgb";
+#endif
 }
 
 SamplingContext::Mode get_sampling_context_mode(const ParamArray& params)

@@ -50,7 +50,7 @@ import zipfile
 # Constants.
 # -------------------------------------------------------------------------------------------------
 
-VERSION = "2.5.4"
+VERSION = "2.6.0"
 SETTINGS_FILENAME = "appleseed.package.configuration.xml"
 
 
@@ -59,15 +59,15 @@ SETTINGS_FILENAME = "appleseed.package.configuration.xml"
 # -------------------------------------------------------------------------------------------------
 
 def info(message):
-    print("  " + message)
+    print("  {0}".format(message))
 
 
 def progress(message):
-    print("  " + message + "...")
+    print("  {0}...".format(message))
 
 
 def fatal(message):
-    print("Fatal: " + message + ". Aborting.")
+    print("Fatal: {0}. Aborting.".format(message))
     if sys.exc_info()[0]:
         print(traceback.format_exc())
     sys.exit(1)
@@ -82,7 +82,7 @@ def safe_delete_file(path):
         if os.path.exists(path):
             os.remove(path)
     except OSError:
-        fatal("Failed to delete file '" + path + "'")
+        fatal("Failed to delete file {0}".format(path))
 
 
 def on_rmtree_error(func, path, exc_info):
@@ -103,7 +103,7 @@ def safe_delete_directory(path):
             if attempt < Attempts - 1:
                 time.sleep(0.5)
             else:
-                fatal("Failed to delete directory '" + path + "'")
+                fatal("Failed to delete directory {0}".format(path))
 
 
 def safe_make_directory(path):
@@ -159,20 +159,20 @@ def merge_tree(src, dst, symlinks=False, ignore=None):
                 shutil.copy2(srcname, dstname)
         # Catch the Error from the recursive copytree so that we can
         # continue with other files.
-        except Error, err:
-            errors.extend(err.args[0])
-        except EnvironmentError, why:
-            errors.append((srcname, dstname, str(why)))
+        except Error as ex:
+            errors.extend(ex.args[0])
+        except EnvironmentError as ex:
+            errors.append((srcname, dstname, str(ex)))
     try:
         shutil.copystat(src, dst)
-    except OSError, why:
-        if WindowsError is not None and isinstance(why, WindowsError):
+    except OSError as ex:
+        if WindowsError is not None and isinstance(ex, WindowsError):
             # Copying file access times may fail on Windows.
             pass
         else:
-            errors.append((src, dst, str(why)))
+            errors.append((src, dst, str(ex)))
     if errors:
-        raise Error, errors
+        raise Error(errors)
 
 
 # -------------------------------------------------------------------------------------------------
@@ -182,12 +182,12 @@ def merge_tree(src, dst, symlinks=False, ignore=None):
 class Settings:
 
     def load(self):
-        print("Loading settings from " + SETTINGS_FILENAME + "...")
+        print("Loading settings from {0}...".format(SETTINGS_FILENAME))
         tree = ElementTree()
         try:
             tree.parse(SETTINGS_FILENAME)
         except IOError:
-            fatal("Failed to load configuration file '" + SETTINGS_FILENAME + "'")
+            fatal("Failed to load configuration file {0}".format(SETTINGS_FILENAME))
         self.__load_values(tree)
         self.__print_summary()
 
@@ -209,15 +209,15 @@ class Settings:
 
     def __print_summary(self):
         print("")
-        print("  Platform:                  " + self.platform)
-        print("  Configuration:             " + self.configuration)
-        print("  Path to appleseed:         " + self.appleseed_path)
-        print("  Path to appleseed headers: " + self.appleseed_headers_path)
-        print("  Path to Qt runtime:        " + self.qt_runtime_path)
+        print("  Platform:                  {0}".format(self.platform))
+        print("  Configuration:             {0}".format(self.configuration))
+        print("  Path to appleseed:         {0}".format(self.appleseed_path))
+        print("  Path to appleseed headers: {0}".format(self.appleseed_headers_path))
+        print("  Path to Qt runtime:        {0}".format(self.qt_runtime_path))
         if os.name == "nt":
-            print("  Path to platform runtime:  " + self.platform_runtime_path)
-        print("  Path to Python 2.7:        " + self.python_path)
-        print("  Output directory:          " + self.package_output_path)
+            print("  Path to platform runtime:  {0}".format(self.platform_runtime_path))
+        print("  Path to Python 2.7:        {0}".format(self.python_path))
+        print("  Output directory:          {0}".format(self.package_output_path))
         print("")
 
 
@@ -239,20 +239,21 @@ class PackageInfo:
 
     def retrieve_git_tag(self):
         old_path = pushd(self.settings.appleseed_path)
-        self.version = subprocess.Popen("git describe --long", stdout=subprocess.PIPE, shell=True).stdout.read().strip()
+        self.version = subprocess.check_output(["git", "describe", "--long"]).decode("utf-8").strip()
         os.chdir(old_path)
 
     def build_package_path(self):
-        package_name = "appleseed-" + self.version + "-" + self.settings.platform + ".zip"
-        self.package_path = os.path.join(self.settings.package_output_path, self.version, package_name)
+        package_dir = "appleseed-{0}".format(self.version)
+        package_name = "appleseed-{0}-{1}.zip".format(self.version, self.settings.platform)
+        self.package_path = os.path.join(self.settings.package_output_path, package_dir, package_name)
 
     def print_summary(self):
         print("")
-        print("  Version:                   " + self.version)
+        print("  Version:                   {0}".format(self.version))
         if not self.no_zip:
-            print("  Package path:              " + self.package_path)
+            print("  Package path:              {0}".format(self.package_path))
         else:
-            print("  Package directory:         " + self.settings.package_output_path)
+            print("  Package directory:         {0}".format(self.settings.package_output_path))
         print("")
 
 
@@ -303,7 +304,7 @@ class PackageBuilder:
     def retrieve_sandbox_from_git_repository(self):
         progress("Retrieving sandbox from Git repository")
         old_path = pushd(os.path.join(self.settings.appleseed_path, "sandbox"))
-        self.run("git archive --format=zip --output=" + os.path.join(old_path, "sandbox.zip") + " --worktree-attributes HEAD")
+        self.run("git archive --format=zip --output={0} --worktree-attributes HEAD".format(os.path.join(old_path, "sandbox.zip")))
         os.chdir(old_path)
 
     def deploy_sandbox_to_stage(self):
@@ -325,7 +326,7 @@ class PackageBuilder:
         safe_delete_file("appleseed/tests/unit benchmarks/inputs/test_knn_photons.bin")
 
         # Temporarily remove Alembic assembly C++ plugin.
-        safe_delete_directory("appleseed/samples/cpp/alembicassembly")
+        safe_delete_directory("appleseed/examples/cpp/alembicassembly")
 
     def add_local_binaries_to_stage(self):
         progress("Adding local binaries to staging directory")
@@ -333,6 +334,7 @@ class PackageBuilder:
         dir_util.copy_tree(os.path.join(self.settings.appleseed_path, "sandbox/bin", self.settings.configuration), "appleseed/bin/")
         shutil.copy(os.path.join(self.settings.appleseed_path, "sandbox/bin", exe("maketx")), "appleseed/bin/")
         shutil.copy(os.path.join(self.settings.appleseed_path, "sandbox/bin", exe("oiiotool")), "appleseed/bin/")
+        shutil.copy(os.path.join(self.settings.appleseed_path, "sandbox/bin", exe("idiff")), "appleseed/bin/")
         shutil.copy(os.path.join(self.settings.appleseed_path, "sandbox/bin", exe("oslc")), "appleseed/bin/")
         shutil.copy(os.path.join(self.settings.appleseed_path, "sandbox/bin", exe("oslinfo")), "appleseed/bin/")
 
@@ -378,7 +380,7 @@ class PackageBuilder:
             # Print dependencies.
             info("    Dependencies:")
             for lib in all_libs:
-                info("      " + lib)
+                info("      {0}".format(lib))
 
         # Copy needed libs to lib directory.
         dest_dir = os.path.join("appleseed", "lib/")
@@ -404,7 +406,7 @@ class PackageBuilder:
 
     def add_shaders_to_stage(self):
         progress("Adding shaders to staging directory")
-        shutil.rmtree("appleseed/shaders")
+        safe_delete_directory("appleseed/shaders")
         shutil.copytree(os.path.join(self.settings.appleseed_path, "sandbox/shaders"), "appleseed/shaders")
         shutil.copytree(os.path.join(self.settings.appleseed_path, "src/appleseed.shaders/src"), "appleseed/shaders/src")
 
@@ -484,9 +486,10 @@ class WindowsPackageBuilder(PackageBuilder):
 
     def add_dependencies_to_stage(self):
         progress("Windows-specific: Adding dependencies to staging directory")
-        self.copy_qt_framework("QtCore")
-        self.copy_qt_framework("QtGui")
-        self.copy_qt_framework("QtOpenGL")
+        self.copy_qt_framework("Qt5Core")
+        self.copy_qt_framework("Qt5Gui")
+        self.copy_qt_framework("Qt5OpenGL")
+        self.copy_qt_framework("Qt5Widgets")
         copy_glob(os.path.join(self.settings.platform_runtime_path, "*"), "appleseed/bin/")
 
     def add_python_to_stage(self):
@@ -506,7 +509,7 @@ class WindowsPackageBuilder(PackageBuilder):
         shutil.copy(os.path.join(self.settings.python_path, "README.txt"), "appleseed/python27")
 
     def copy_qt_framework(self, framework_name):
-        src_filepath = os.path.join(self.settings.qt_runtime_path, framework_name + "4" + ".dll")
+        src_filepath = os.path.join(self.settings.qt_runtime_path, framework_name + ".dll")
         dst_path = os.path.join("appleseed", "bin")
         shutil.copy(src_filepath, dst_path)
 
@@ -643,7 +646,7 @@ class MacPackageBuilder(PackageBuilder):
             # Parse the line.
             m = re.match(r"(.*) \(compatibility version .*, current version .*\)", line)
             if not m:
-                fatal("Failed to parse line from otool(1) output: " + line)
+                fatal("Failed to parse line from otool(1) output: {0}".format(line))
             lib = m.group(1)
 
             # Ignore libs relative to @rpath.
@@ -695,7 +698,7 @@ class MacPackageBuilder(PackageBuilder):
             # Parse the line.
             m = re.match(r"(.*) \(compatibility version .*, current version .*\)", line)
             if not m:
-                fatal("Failed to parse line from otool(1) output: " + line)
+                fatal("Failed to parse line from otool(1) output: {0}".format(line))
             lib = m.group(1)
 
             if re.search(r"Qt.*\.framework", lib):
@@ -733,6 +736,7 @@ class LinuxPackageBuilder(PackageBuilder):
     def alter_stage(self):
         self.make_executable(os.path.join("appleseed/bin", "maketx"))
         self.make_executable(os.path.join("appleseed/bin", "oiiotool"))
+        self.make_executable(os.path.join("appleseed/bin", "idiff"))
         self.make_executable(os.path.join("appleseed/bin", "oslc"))
         self.make_executable(os.path.join("appleseed/bin", "oslinfo"))
         self.add_dependencies_to_stage()
@@ -755,14 +759,14 @@ class LinuxPackageBuilder(PackageBuilder):
             for filename in filenames:
                 ext = os.path.splitext(filename)[1]
                 if ext != ".py" and ext != ".conf":
-                    self.run("chrpath -r \$ORIGIN/../lib " + os.path.join("appleseed/bin", filename))
+                    self.run("chrpath -r \$ORIGIN/../lib {0}".format(os.path.join("appleseed/bin", filename)))
 
     def clear_runtime_paths_on_libraries(self):
         progress("Linux-specific: Clearing runtime paths on libraries")
         for dirpath, dirnames, filenames in os.walk("appleseed/lib"):
             for filename in filenames:
                 if os.path.splitext(filename)[1] == ".so":
-                    self.run("chrpath -d " + os.path.join(dirpath, filename))
+                    self.run("chrpath -d {0}".format(os.path.join(dirpath, filename)))
 
     def get_dependencies_for_file(self, filename):
         returncode, out, err = self.run_subprocess(["ldd", filename])
@@ -807,19 +811,19 @@ class LinuxPackageBuilder(PackageBuilder):
 def main():
     parser = argparse.ArgumentParser(description="build an appleseed package from sources")
 
-    parser.add_argument("--nozip", help="do not build a final .zip.  Files will be copied to staging directory only", action="store_true")
+    parser.add_argument("--nozip", help="do not build a final zip file. Files will be copied to staging directory only", action="store_true")
 
     args = parser.parse_args()
 
     no_zip = args.nozip
 
-    print("appleseed.package version " + VERSION)
+    print("appleseed.package version {0}".format(VERSION))
     print("")
 
     print("IMPORTANT:")
     print("")
     print("  - You may need to run this tool with sudo on Linux and macOS")
-    print("  - Make sure there are no obsolete binaries in sandbox/bin")
+    print("  - Make sure there are no obsolete binaries in sandbox/bin and sandbox/lib")
     print("")
 
     settings = Settings()
@@ -835,9 +839,10 @@ def main():
     elif os.name == "posix" and platform.mac_ver()[0] == "":
         package_builder = LinuxPackageBuilder(settings, package_info)
     else:
-        fatal("Unsupported platform: " + os.name)
+        fatal("Unsupported platform: {0}".format(os.name))
 
     package_builder.build_package()
+
 
 if __name__ == "__main__":
     main()

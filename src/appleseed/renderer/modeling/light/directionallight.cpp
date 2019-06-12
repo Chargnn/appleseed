@@ -105,9 +105,7 @@ namespace
             if (!check_uniform("irradiance") ||
                 !check_uniform("irradiance_multiplier") ||
                 !check_uniform("exposure"))
-            {
                 return false;
-            }
 
             check_non_zero_emission("irradiance", "irradiance_multiplier");
 
@@ -246,6 +244,7 @@ namespace
             value = m_values.m_irradiance;
 
             probability = 1.0f / (Pi<float>() * square(static_cast<float>(disk_radius)));
+            assert(probability > 0.0f);
         }
     };
 }

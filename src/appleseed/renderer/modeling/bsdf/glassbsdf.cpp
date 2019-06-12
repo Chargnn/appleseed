@@ -37,7 +37,6 @@
 #include "renderer/modeling/bsdf/bsdfsample.h"
 #include "renderer/modeling/bsdf/bsdfwrapper.h"
 #include "renderer/modeling/bsdf/energycompensation.h"
-#include "renderer/modeling/bsdf/energycompensationtables.h"
 #include "renderer/modeling/bsdf/microfacethelper.h"
 #include "renderer/utility/messagecontext.h"
 #include "renderer/utility/paramarray.h"
@@ -53,7 +52,6 @@
 #include "foundation/utility/api/specializedapiarrays.h"
 #include "foundation/utility/containers/dictionary.h"
 #include "foundation/utility/makevector.h"
-#include "foundation/utility/otherwise.h"
 
 // Boost headers.
 #include "boost/filesystem/path.hpp"
@@ -90,29 +88,59 @@ namespace
     //   [2] Extending the Disney BRDF to a BSDF with Integrated Subsurface Scattering
     //       http://blog.selfshadow.com/publications/s2015-shading-course/burley/s2015_pbs_disney_bsdf_notes.pdf
     //
-    //   [3] Revisiting Physically Based Shading at Imageworks
-    //       http://blog.selfshadow.com/publications/s2017-shading-course/imageworks/s2017_pbs_imageworks_slides.pdf
-    //
 
-    float get_dir_albedo(
-        const GGXMDF&       mdf,
+    float fresnel_reflectance(
+        const float         cos_theta_i,
         const float         eta,
-        const float         roughness,
-        const float         cos_theta);
+        float&              cos_theta_t)
+    {
+        const float sin_theta_t2 = (1.0f - square(cos_theta_i)) * square(eta);
+        if (sin_theta_t2 > 1.0f)
+        {
+            cos_theta_t = 0.0f;
+            return 1.0f;
+        }
+
+        cos_theta_t = min(sqrt(max(1.0f - sin_theta_t2, 0.0f)), 1.0f);
+
+        float F;
+        fresnel_reflectance_dielectric(
+            F,
+            eta,
+            abs(cos_theta_i),
+            cos_theta_t);
+
+        return F;
+    }
+
+    float fresnel_reflectance(
+        const float         cos_theta_i,
+        const float         eta)
+    {
+        float cos_theta_t;
+        return fresnel_reflectance(cos_theta_i, eta, cos_theta_t);
+    }
+
+    Vector3f refracted_direction(
+        const Vector3f&     wo,
+        const Vector3f&     m,
+        const float         cos_wom,
+        const float         cos_theta_t,
+        const float         rcp_eta)
+    {
+        const Vector3f wi =
+            cos_wom > 0.0f
+                ? (rcp_eta * cos_wom - cos_theta_t) * m - rcp_eta * wo
+                : (rcp_eta * cos_wom + cos_theta_t) * m - rcp_eta * wo;
+        return improve_normalization(wi);
+    }
 
     float get_dir_albedo(
-        const BeckmannMDF&  mdf,
         const float         eta,
         const float         roughness,
         const float         cos_theta);
 
     float get_avg_albedo(
-        const GGXMDF&       mdf,
-        const float         eta,
-        const float         roughness);
-
-    float get_avg_albedo(
-        const BeckmannMDF&  mdf,
         const float         eta,
         const float         roughness);
 
@@ -134,7 +162,6 @@ namespace
             m_inputs.declare("reflection_tint", InputFormatSpectralReflectance, "1.0");
             m_inputs.declare("refraction_tint", InputFormatSpectralReflectance, "1.0");
             m_inputs.declare("roughness", InputFormatFloat, "0.15");
-            m_inputs.declare("highlight_falloff", InputFormatFloat, "0.4");
             m_inputs.declare("anisotropy", InputFormatFloat, "0.0");
             m_inputs.declare("ior", InputFormatFloat, "1.5");
             m_inputs.declare("volume_transmittance", InputFormatSpectralReflectance, "1.0");
@@ -155,11 +182,6 @@ namespace
             return Model;
         }
 
-        size_t compute_input_data_size() const override
-        {
-            return sizeof(InputValues);
-        }
-
         bool on_frame_begin(
             const Project&              project,
             const BaseGroup*            parent,
@@ -170,21 +192,6 @@ namespace
                 return false;
 
             const OnFrameBeginMessageContext context("bsdf", this);
-
-            const string mdf =
-                m_params.get_required<string>(
-                    "mdf",
-                    "ggx",
-                    make_vector("beckmann", "ggx", "std"),
-                    context);
-
-            if (mdf == "ggx")
-                m_mdf_type = GGX;
-            else if (mdf == "beckmann")
-                m_mdf_type = Beckmann;
-            else if (mdf == "std")
-                m_mdf_type = Std;
-            else return false;
 
             const string volume_parameterization =
                 m_params.get_required<string>(
@@ -202,6 +209,11 @@ namespace
             return true;
         }
 
+        size_t compute_input_data_size() const override
+        {
+            return sizeof(InputValues);
+        }
+
         void prepare_inputs(
             Arena&                      arena,
             const ShadingPoint&         shading_point,
@@ -211,7 +223,7 @@ namespace
 
             new (&values->m_precomputed) InputValues::Precomputed();
 
-            values->m_roughness = max(values->m_roughness, shading_point.get_ray().m_max_roughness);
+            values->m_roughness = max(values->m_roughness, shading_point.get_ray().m_min_roughness);
 
             if (shading_point.is_entering())
             {
@@ -247,12 +259,10 @@ namespace
             const int                   modes,
             BSDFSample&                 sample) const override
         {
-            const InputValues* values = static_cast<const InputValues*>(data);
-
-            sample.m_max_roughness = values->m_roughness;
-
             if (!ScatteringMode::has_glossy(modes))
                 return;
+
+            const InputValues* values = static_cast<const InputValues*>(data);
 
             const Basis3f basis(
                 values->m_precomputed.m_backfacing
@@ -282,147 +292,24 @@ namespace
             sampling_context.split_in_place(3, 1);
             const Vector3f s = sampling_context.next2<Vector3f>();
 
-            Vector3f wi;
-            bool is_refraction;
-
-            switch (m_mdf_type)
-            {
-              case GGX:
-                {
-                    const GGXMDF mdf;
-                    is_refraction = do_sample(
-                        mdf,
-                        s,
-                        adjoint,
-                        basis,
-                        alpha_x,
-                        alpha_y,
-                        0.0f, // gamma
-                        values->m_precomputed.m_reflection_color,
-                        values->m_precomputed.m_reflection_weight,
-                        values->m_precomputed.m_refraction_color,
-                        values->m_precomputed.m_refraction_weight,
-                        eta,
-                        wo,
-                        wi,
-                        sample.m_value.m_glossy,
-                        sample.m_probability);
-
-                    add_energy_compensation_term(
-                        mdf,
-                        values,
-                        Vector3f(0.0f, 1.0f, 0.0f),
-                        wo,
-                        wi,
-                        sample.m_value.m_glossy);
-                }
-                break;
-
-              case Beckmann:
-                {
-                    const BeckmannMDF mdf;
-                    is_refraction = do_sample(
-                        mdf,
-                        s,
-                        adjoint,
-                        basis,
-                        alpha_x,
-                        alpha_y,
-                        0.0f, // gamma
-                        values->m_precomputed.m_reflection_color,
-                        values->m_precomputed.m_reflection_weight,
-                        values->m_precomputed.m_refraction_color,
-                        values->m_precomputed.m_refraction_weight,
-                        eta,
-                        wo,
-                        wi,
-                        sample.m_value.m_glossy,
-                        sample.m_probability);
-
-                    add_energy_compensation_term(
-                        mdf,
-                        values,
-                        Vector3f(0.0f, 1.0f, 0.0f),
-                        wo,
-                        wi,
-                        sample.m_value.m_glossy);
-                }
-                break;
-
-              case Std:
-                {
-                    const StdMDF mdf;
-                    is_refraction = do_sample(
-                        mdf,
-                        s,
-                        adjoint,
-                        basis,
-                        alpha_x,
-                        alpha_y,
-                        highlight_falloff_to_gama(values->m_highlight_falloff),
-                        values->m_precomputed.m_reflection_color,
-                        values->m_precomputed.m_reflection_weight,
-                        values->m_precomputed.m_refraction_color,
-                        values->m_precomputed.m_refraction_weight,
-                        eta,
-                        wo,
-                        wi,
-                        sample.m_value.m_glossy,
-                        sample.m_probability);
-                }
-                break;
-
-              assert_otherwise;
-            }
-
-            if (sample.m_probability < 1.0e-6f)
-                return;
-
-            sample.m_value.m_beauty = sample.m_value.m_glossy;
-
-            sample.m_mode = ScatteringMode::Glossy;
-
-            sample.m_incoming = Dual3f(basis.transform_to_parent(wi));
-
-            if (is_refraction)
-                sample.compute_transmitted_differentials(1.0f / eta);
-            else sample.compute_reflected_differentials();
-        }
-
-        template <typename MDF, typename SpectrumType>
-        static bool do_sample(
-            const MDF&                  mdf,
-            const Vector3f&             s,
-            const bool                  adjoint,
-            const Basis3f&              basis,
-            const float                 alpha_x,
-            const float                 alpha_y,
-            const float                 gamma,
-            const SpectrumType&         reflection_color,
-            const float                 reflection_weight,
-            const SpectrumType&         refraction_color,
-            const float                 refraction_weight,
-            const float                 eta,
-            const Vector3f&             wo,
-            Vector3f&                   wi,
-            SpectrumType&               value,
-            float&                      probability)
-        {
             // Compute the microfacet normal by sampling the MDF.
-            Vector3f m = mdf.sample(wo, Vector2f(s[0], s[1]), alpha_x, alpha_y, gamma);
+            const Vector3f m = GGXMDF::sample(wo, Vector2f(s[0], s[1]), alpha_x, alpha_y);
             assert(m.y > 0.0f);
 
+            // Compute the Fresnel term and the sampling probabilities.
             const float rcp_eta = 1.0f / eta;
-
             const float cos_wom = clamp(dot(wo, m), -1.0f, 1.0f);
 
             float cos_theta_t;
             const float F = fresnel_reflectance(cos_wom, rcp_eta, cos_theta_t);
-            const float r_probability = choose_reflection_probability(
-                reflection_weight,
-                refraction_weight,
-                F);
+            const float r_probability =
+                choose_reflection_probability(
+                    values->m_precomputed.m_reflection_weight,
+                    values->m_precomputed.m_refraction_weight,
+                    F);
 
+            Vector3f wi;
+            float probability;
             bool is_refraction;
 
             // Choose between reflection and refraction.
@@ -435,77 +322,72 @@ namespace
 
                 // If incoming and outgoing are on different sides of the surface, this is not a reflection.
                 if (wi.y * wo.y <= 0.0f)
-                {
-                    probability = 0.0f;
-                    return true;
-                }
+                    return;
 
                 evaluate_reflection(
-                    mdf,
-                    reflection_color,
+                    values->m_precomputed.m_reflection_color,
                     wo,
                     wi,
                     m,
                     alpha_x,
                     alpha_y,
-                    gamma,
                     F,
-                    value);
+                    sample.m_value.m_glossy);
 
                 probability =
                     r_probability *
-                    reflection_pdf(mdf, wo, m, cos_wom, alpha_x, alpha_y, gamma);
+                    reflection_pdf(wo, m, cos_wom, alpha_x, alpha_y);
             }
             else
             {
                 is_refraction = true;
-
-                // Compute the refracted direction.
-                wi =
-                    cos_wom > 0.0f
-                        ? (rcp_eta * cos_wom - cos_theta_t) * m - rcp_eta * wo
-                        : (rcp_eta * cos_wom + cos_theta_t) * m - rcp_eta * wo;
-                wi = improve_normalization(wi);
+                wi = refracted_direction(
+                    wo,
+                    m,
+                    cos_wom,
+                    cos_theta_t,
+                    rcp_eta);
 
                 // If incoming and outgoing are on the same side of the surface, this is not a refraction.
                 if (wi.y * wo.y > 0.0f)
-                {
-                    probability = 0.0f;
-                    return false;
-                }
+                    return;
 
                 evaluate_refraction(
-                    mdf,
                     eta,
-                    refraction_color,
+                    values->m_precomputed.m_refraction_color,
                     adjoint,
                     wo,
                     wi,
                     m,
                     alpha_x,
                     alpha_y,
-                    gamma,
                     1.0f - F,
-                    value);
-
-                // Recompute the half vector to have a better
-                // match with the result of the pdf method.
-                const Vector3f m_pdf = half_refraction_vector(wo, wi, eta);
+                    sample.m_value.m_glossy);
 
                 probability =
                     (1.0f - r_probability) *
                     refraction_pdf(
-                        mdf,
                         wo,
                         wi,
-                        m_pdf,
+                        m,
                         alpha_x,
                         alpha_y,
-                        gamma,
                         eta);
             }
 
-            return is_refraction;
+            assert(probability > 0.0f);
+
+            if (probability > 1.0e-6f)
+            {
+                sample.set_to_scattering(ScatteringMode::Glossy, probability);
+                sample.m_value.m_beauty = sample.m_value.m_glossy;
+                sample.m_incoming = Dual3f(basis.transform_to_parent(wi));
+                sample.m_min_roughness = values->m_roughness;
+
+                if (is_refraction)
+                    sample.compute_transmitted_differentials(1.0f / eta);
+                else sample.compute_reflected_differentials();
+            }
         }
 
         float evaluate(
@@ -524,84 +406,6 @@ namespace
             if (!ScatteringMode::has_glossy(modes))
                 return 0.0f;
 
-            switch (m_mdf_type)
-            {
-              case GGX:
-                {
-                    const GGXMDF mdf;
-                    const float pdf = do_evaluate(
-                        mdf,
-                        values,
-                        adjoint,
-                        shading_basis,
-                        outgoing,
-                        incoming,
-                        value);
-                    add_energy_compensation_term(
-                        mdf,
-                        values,
-                        shading_basis.get_normal(),
-                        outgoing,
-                        incoming,
-                        value.m_glossy);
-
-                    return pdf;
-                }
-                break;
-
-              case Beckmann:
-                {
-                    const BeckmannMDF mdf;
-                    const float pdf = do_evaluate(
-                        mdf,
-                        values,
-                        adjoint,
-                        shading_basis,
-                        outgoing,
-                        incoming,
-                        value);
-                    add_energy_compensation_term(
-                        mdf,
-                        values,
-                        shading_basis.get_normal(),
-                        outgoing,
-                        incoming,
-                        value.m_glossy);
-
-                    return pdf;
-                }
-                break;
-
-              case Std:
-                {
-                    const StdMDF mdf;
-                    return do_evaluate(
-                        mdf,
-                        values,
-                        adjoint,
-                        shading_basis,
-                        outgoing,
-                        incoming,
-                        value);
-                }
-                break;
-
-              default:
-                assert(!"Unexpected MDF type.");
-                return 0.0f;
-            }
-        }
-
-        template <typename MDF>
-        static float do_evaluate(
-            const MDF&                  mdf,
-            const InputValues*          values,
-            const bool                  adjoint,
-            const Basis3f&              shading_basis,
-            const Vector3f&             outgoing,
-            const Vector3f&             incoming,
-            DirectShadingComponents&    value)
-        {
             const Basis3f basis(
                 values->m_precomputed.m_backfacing
                     ? Basis3f(-shading_basis.get_normal(), shading_basis.get_tangent_u(), -shading_basis.get_tangent_v())
@@ -628,9 +432,9 @@ namespace
                 values->m_anisotropy,
                 alpha_x,
                 alpha_y);
-            const float gamma = highlight_falloff_to_gama(values->m_highlight_falloff);
 
             const Vector3f wi = basis.transform_to_local(incoming);
+            float pdf;
 
             if (wi.y * wo.y >= 0.0f)
             {
@@ -641,36 +445,34 @@ namespace
                 const float F = fresnel_reflectance(cos_wom, rcp_eta);
 
                 evaluate_reflection(
-                    mdf,
                     values->m_precomputed.m_reflection_color,
                     wo,
                     wi,
                     m,
                     alpha_x,
                     alpha_y,
-                    gamma,
                     F,
                     value.m_glossy);
                 value.m_beauty = value.m_glossy;
 
-                const float r_probability = choose_reflection_probability(
-                    values->m_precomputed.m_reflection_weight,
-                    values->m_precomputed.m_refraction_weight,
-                    F);
+                const float r_probability =
+                    choose_reflection_probability(
+                        values->m_precomputed.m_reflection_weight,
+                        values->m_precomputed.m_refraction_weight,
+                        F);
 
-                return
-                    r_probability * reflection_pdf(mdf, wo, m, cos_wom, alpha_x, alpha_y, gamma);
+                pdf =
+                    r_probability *
+                    reflection_pdf(wo, m, cos_wom, alpha_x, alpha_y);
             }
             else
             {
                 // Refraction.
-
                 const Vector3f m = half_refraction_vector(wo, wi, eta);
                 const float cos_wom = dot(wo, m);
                 const float F = fresnel_reflectance(cos_wom, 1.0f / eta);
 
                 evaluate_refraction(
-                    mdf,
                     eta,
                     values->m_precomputed.m_refraction_color,
                     adjoint,
@@ -679,20 +481,23 @@ namespace
                     m,
                     alpha_x,
                     alpha_y,
-                    gamma,
                     1.0f - F,
                     value.m_glossy);
                 value.m_beauty = value.m_glossy;
 
-                const float r_probability = choose_reflection_probability(
-                    values->m_precomputed.m_reflection_weight,
-                    values->m_precomputed.m_refraction_weight,
-                    F);
+                const float r_probability =
+                    choose_reflection_probability(
+                        values->m_precomputed.m_reflection_weight,
+                        values->m_precomputed.m_refraction_weight,
+                        F);
 
-                return
+                pdf =
                     (1.0f - r_probability) *
-                    refraction_pdf(mdf, wo, wi, m, alpha_x, alpha_y, gamma, eta);
+                    refraction_pdf(wo, wi, m, alpha_x, alpha_y, eta);
             }
+
+            assert(pdf >= 0.0f);
+            return pdf;
         }
 
         float evaluate_pdf(
@@ -709,58 +514,6 @@ namespace
             if (!ScatteringMode::has_glossy(modes))
                 return 0.0f;
 
-            switch (m_mdf_type)
-            {
-              case GGX:
-                {
-                    const GGXMDF mdf;
-                    return do_evaluate_pdf(
-                        mdf,
-                        values,
-                        shading_basis,
-                        outgoing,
-                        incoming);
-                }
-                break;
-
-              case Beckmann:
-                {
-                    const BeckmannMDF mdf;
-                    return do_evaluate_pdf(
-                        mdf,
-                        values,
-                        shading_basis,
-                        outgoing,
-                        incoming);
-                }
-                break;
-
-              case Std:
-                {
-                    const StdMDF mdf;
-                    return do_evaluate_pdf(
-                        mdf,
-                        values,
-                        shading_basis,
-                        outgoing,
-                        incoming);
-                }
-                break;
-
-              default:
-                assert(!"Unexpected MDF type.");
-                return 0.0f;
-            }
-        }
-
-        template <typename MDF>
-        static float do_evaluate_pdf(
-            const MDF&                  mdf,
-            const InputValues*          values,
-            const Basis3f&              shading_basis,
-            const Vector3f&             outgoing,
-            const Vector3f&             incoming)
-        {
             const Basis3f basis(
                 values->m_precomputed.m_backfacing
                     ? Basis3f(-shading_basis.get_normal(), shading_basis.get_tangent_u(), -shading_basis.get_tangent_v())
@@ -784,9 +537,9 @@ namespace
                 values->m_anisotropy,
                 alpha_x,
                 alpha_y);
-            const float gamma = highlight_falloff_to_gama(values->m_highlight_falloff);
 
             const Vector3f wi = basis.transform_to_local(incoming);
+            float pdf;
 
             if (wi.y * wo.y >= 0.0f)
             {
@@ -796,19 +549,19 @@ namespace
 
                 const float F = fresnel_reflectance(cos_wom, rcp_eta);
 
-                const float r_probability = choose_reflection_probability(
-                    values->m_precomputed.m_reflection_weight,
-                    values->m_precomputed.m_refraction_weight,
-                    F);
+                const float r_probability =
+                    choose_reflection_probability(
+                        values->m_precomputed.m_reflection_weight,
+                        values->m_precomputed.m_refraction_weight,
+                        F);
 
-                return
+                pdf =
                     r_probability *
-                    reflection_pdf(mdf, wo, m, cos_wom, alpha_x, alpha_y, gamma);
+                    reflection_pdf(wo, m, cos_wom, alpha_x, alpha_y);
             }
             else
             {
                 // Refraction.
-
                 const Vector3f m = half_refraction_vector(wo, wi, eta);
                 const float cos_wom = dot(wo, m);
                 const float F = fresnel_reflectance(cos_wom, rcp_eta);
@@ -818,10 +571,13 @@ namespace
                     values->m_precomputed.m_refraction_weight,
                     F);
 
-                return
+                pdf =
                     (1.0f - r_probability) *
-                    refraction_pdf(mdf, wo, wi, m, alpha_x, alpha_y, gamma, eta);
+                    refraction_pdf(wo, wi, m, alpha_x, alpha_y, eta);
             }
+
+            assert(pdf >= 0.0f);
+            return pdf;
         }
 
         float sample_ior(
@@ -874,15 +630,6 @@ namespace
         }
 
       private:
-        enum MDFType
-        {
-            GGX = 0,
-            Beckmann,
-            Std
-        };
-
-        MDFType m_mdf_type;
-
         enum VolumeParameterization
         {
             TransmittanceParameterization,
@@ -899,43 +646,7 @@ namespace
             const float r_probability = F * reflection_weight;
             const float t_probability = (1.0f - F) * refraction_weight;
             const float sum_probabilities = r_probability + t_probability;
-
-            if (sum_probabilities != 0.0f)
-                return r_probability / sum_probabilities;
-
-            return 1.0f;
-        }
-
-        static float fresnel_reflectance(
-            const float                 cos_theta_i,
-            const float                 eta,
-            float&                      cos_theta_t)
-        {
-            const float sin_theta_t2 = (1.0f - square(cos_theta_i)) * square(eta);
-
-            if (sin_theta_t2 > 1.0f)
-            {
-                cos_theta_t = 0.0f;
-                return 1.0f;
-            }
-
-            cos_theta_t = min(sqrt(max(1.0f - sin_theta_t2, 0.0f)), 1.0f);
-
-            float F;
-            fresnel_reflectance_dielectric(
-                F,
-                eta,
-                abs(cos_theta_i),
-                cos_theta_t);
-            return F;
-        }
-
-        static float fresnel_reflectance(
-            const float                 cos_theta_i,
-            const float                 eta)
-        {
-            float cos_theta_t;
-            return fresnel_reflectance(cos_theta_i, eta, cos_theta_t);
+            return sum_probabilities != 0.0f ? r_probability / sum_probabilities : 1.0f;
         }
 
         static Vector3f half_reflection_vector(
@@ -947,49 +658,44 @@ namespace
             return h.y < 0.0f ? -h : h;
         }
 
-        template <typename SpectrumType>
         static void evaluate_reflection(
-            const MDF&                  mdf,
-            const SpectrumType&         reflection_color,
+            const Spectrum&             reflection_color,
             const Vector3f&             wo,
             const Vector3f&             wi,
             const Vector3f&             m,
             const float                 alpha_x,
             const float                 alpha_y,
-            const float                 gamma,
             const float                 F,
-            SpectrumType&               value)
+            Spectrum&                   value)
         {
             // [1] eq. 20.
             const float denom = abs(4.0f * wo.y * wi.y);
             if (denom == 0.0f)
             {
-                set_to_zero(value);
+                value.set(0.0f);
                 return;
             }
 
-            const float D = mdf.D(m, alpha_x, alpha_y, gamma);
-            const float G = mdf.G(wi, wo, m, alpha_x, alpha_y, gamma);
+            const float D = GGXMDF::D(m, alpha_x, alpha_y);
+            const float G = GGXMDF::G(wi, wo, m, alpha_x, alpha_y);
 
             value = reflection_color;
             value *= F * D * G / denom;
         }
 
         static float reflection_pdf(
-            const MDF&                  mdf,
             const Vector3f&             wo,
             const Vector3f&             m,
             const float                 cos_oh,
             const float                 alpha_x,
-            const float                 alpha_y,
-            const float                 gamma)
+            const float                 alpha_y)
         {
             // [1] eq. 14.
             if (cos_oh == 0.0f)
                 return 0.0f;
 
             const float jacobian = 1.0f / (4.0f * abs(cos_oh));
-            return jacobian * mdf.pdf(wo, m, alpha_x, alpha_y, gamma);
+            return jacobian * GGXMDF::pdf(wo, m, alpha_x, alpha_y);
         }
 
         static Vector3f half_refraction_vector(
@@ -1002,24 +708,21 @@ namespace
             return h.y < 0.0f ? -h : h;
         }
 
-        template <typename SpectrumType>
         static void evaluate_refraction(
-            const MDF&                  mdf,
             const float                 eta,
-            const SpectrumType&         refraction_color,
+            const Spectrum&             refraction_color,
             const bool                  adjoint,
             const Vector3f&             wo,
             const Vector3f&             wi,
             const Vector3f&             m,
             const float                 alpha_x,
             const float                 alpha_y,
-            const float                 gamma,
             const float                 T,
-            SpectrumType&               value)
+            Spectrum&                   value)
         {
             if (wo.y == 0.0f || wi.y == 0.0f)
             {
-                set_to_zero(value);
+                value.set(0.0f);
                 return;
             }
 
@@ -1031,12 +734,12 @@ namespace
             const float sqrt_denom = cos_oh + eta * cos_ih;
             if (abs(sqrt_denom) < 1.0e-6f)
             {
-                set_to_zero(value);
+                value.set(0.0f);
                 return;
             }
 
-            const float D = mdf.D(m, alpha_x, alpha_y, gamma);
-            const float G = mdf.G(wi, wo, m, alpha_x, alpha_y, gamma);
+            const float D = GGXMDF::D(m, alpha_x, alpha_y);
+            const float G = GGXMDF::G(wi, wo, m, alpha_x, alpha_y);
 
             float multiplier = abs(dots) * T * D * G / square(sqrt_denom);
 
@@ -1048,13 +751,11 @@ namespace
         }
 
         static float refraction_pdf(
-            const MDF&                  mdf,
             const Vector3f&             wo,
             const Vector3f&             wi,
             const Vector3f&             m,
             const float                 alpha_x,
             const float                 alpha_y,
-            const float                 gamma,
             const float                 eta)
         {
             // [1] eq. 17.
@@ -1066,193 +767,13 @@ namespace
                 return 0.0f;
 
             const float jacobian = abs(cos_ih) * square(eta / sqrt_denom);
-            return jacobian * mdf.pdf(wo, m, alpha_x, alpha_y, gamma);
-        }
-
-        static void set_to_zero(float& x)
-        {
-            x = 0.0f;
-        }
-
-        static void set_to_zero(Spectrum& x)
-        {
-            x.set(0.0f);
-        }
-
-        static float ec_lobe_ratio(
-            const float eta,
-            const float favg,
-            const float favg_rcp_eta,
-            const float eavg,
-            const float eavg_rcp_eta,
-            const float reflection_weight,
-            const float refraction_weight)
-        {
-            const float a = (1.0f - favg) / (1.0f - eavg_rcp_eta);
-            const float b = (1.0f - favg_rcp_eta) * square(eta) / (1.0f - eavg);
-            const float ratio = b / (a + b);
-
-            const float r_ratio = reflection_weight * ratio;
-            const float t_ratio = refraction_weight * (1.0f - ratio);
-            const float sum_ratios = r_ratio + t_ratio;
-
-            if (sum_ratios != 0.0f)
-                return r_ratio / sum_ratios;
-
-            return 0.0f;
-        }
-
-        template <typename MDF>
-        static void add_energy_compensation_term(
-            const MDF&                  mdf,
-            const InputValues*          values,
-            const Vector3f&             normal,
-            const Vector3f&             outgoing,
-            const Vector3f&             incoming,
-            Spectrum&                   value)
-        {
-            if (values->m_energy_compensation == 0.0f)
-                return;
-
-            const float cos_in = dot(incoming, normal);
-            const float cos_on = dot(outgoing, normal);
-
-            const float roughness = values->m_roughness;
-
-            const float eta =
-                cos_on > 0.0f
-                    ? values->m_ior / values->m_precomputed.m_outside_ior
-                    : values->m_precomputed.m_outside_ior / values->m_ior;
-
-            const float rcp_eta = 1.0f / eta;
-
-            const float Eavg = get_avg_albedo(mdf, eta, roughness);
-            const float Eavg_rcp_eta = get_avg_albedo(mdf, rcp_eta, roughness);
-
-            // Avoid divisions by zero.
-            if (Eavg == 1.0f || Eavg_rcp_eta == 1.0f)
-                return;
-
-            const float Favg = average_fresnel_reflectance_dielectric(eta);
-            const float Favg_rcp_eta = average_fresnel_reflectance_dielectric(rcp_eta);
-
-            const bool is_entering = !values->m_precomputed.m_backfacing;
-            const bool is_reflection = cos_in * cos_on >= 0.0f;
-
-            float fms_multiplier = 0.0f;
-
-            if (is_entering)
-            {
-                const float ratio =
-                    ec_lobe_ratio(
-                        eta,
-                        Favg,
-                        Favg_rcp_eta,
-                        Eavg,
-                        Eavg_rcp_eta,
-                        values->m_precomputed.m_reflection_weight,
-                        values->m_precomputed.m_refraction_weight);
-
-                const float Eo = get_dir_albedo(
-                    mdf,
-                    eta,
-                    roughness,
-                    abs(cos_on));
-
-                if (is_reflection)
-                {
-                    // ratio(n) * (1 - E(n, uo)) * (1 - E(n, ui))
-                    // ------------------------------------------
-                    //           Pi * (1 - Eavg(n))
-
-                    const float Ei = get_dir_albedo(
-                        mdf,
-                        eta,
-                        roughness,
-                        abs(cos_in));
-
-                    fms_multiplier =
-                        ratio * (1.0f - Eo) * (1.0f - Ei) / (Pi<float>() * (1.0f - Eavg));
-                }
-                else
-                {
-                    // (1 - ratio(n)) * (1 - E(n, uo)) * (1 - E(1/n, ui))
-                    // --------------------------------------------------
-                    //             Pi * (1 - Eavg(1/n))
-
-                    const float Ei = get_dir_albedo(
-                        mdf,
-                        rcp_eta,
-                        roughness,
-                        abs(cos_in));
-
-                    fms_multiplier =
-                        (1.0f - ratio) * (1.0f - Eo) * (1.0f - Ei) / (Pi<float>() * (1.0f - Eavg_rcp_eta));
-                }
-            }
-            else
-            {
-                const float ratio =
-                    ec_lobe_ratio(
-                        rcp_eta,
-                        Favg_rcp_eta,
-                        Favg,
-                        Eavg_rcp_eta,
-                        Eavg,
-                        values->m_precomputed.m_reflection_weight,
-                        values->m_precomputed.m_refraction_weight);
-
-                const float Eo = get_dir_albedo(
-                    mdf,
-                    rcp_eta,
-                    roughness,
-                    abs(cos_on));
-
-                if (is_reflection)
-                {
-                    // ratio(1/n) * (1 - E(1/n, uo)) * (1 - E(1/n, ui))
-                    // ------------------------------------------------
-                    //             Pi * (1 - Eavg(n))
-
-                    const float Ei = get_dir_albedo(
-                        mdf,
-                        rcp_eta,
-                        roughness,
-                        abs(cos_in));
-
-                    fms_multiplier =
-                        ratio * (1.0f - Eo) * (1.0f - Ei) / (Pi<float>() * (1.0f - Eavg));
-                }
-                else
-                {
-                    // (1 - ratio(1/n)) * (1 - E(1/n, uo)) * (1 - E(n, ui))
-                    // ----------------------------------------------------
-                    //               Pi * (1 - Eavg(n))
-
-                    const float Ei = get_dir_albedo(
-                        mdf,
-                        eta,
-                        roughness,
-                        abs(cos_in));
-
-                    fms_multiplier =
-                        (1.0f - ratio) * (1.0f - Eo) * (1.0f - Ei) / (Pi<float>() * (1.0f - Eavg));
-                }
-            }
-
-            fms_multiplier = lerp(0.0f, fms_multiplier, values->m_energy_compensation);
-
-            madd(
-                value,
-                is_reflection
-                    ? values->m_precomputed.m_reflection_color
-                    : values->m_precomputed.m_refraction_color,
-                fms_multiplier);
+            return jacobian * GGXMDF::pdf(wo, m, alpha_x, alpha_y);
         }
     };
 
     typedef BSDFWrapper<GlassBSDFImpl, false> GlassBSDF;
 
+#ifdef COMPUTE_ALBEDO_TABLES
     const float MinEta = 1.01f;
     const float MaxEta = 3.0f;
 
@@ -1260,13 +781,7 @@ namespace
       : public AlbedoTable3D
     {
       public:
-        GlassAlbedoTable(const float* table, const float min_eta, const float max_eta)
-          : AlbedoTable3D(table, min_eta, max_eta)
-        {
-        }
-
-        template <typename MDF>
-        GlassAlbedoTable(const MDF& mdf, const float min_eta, const float max_eta)
+        GlassAlbedoTable(const float min_eta, const float max_eta)
           : AlbedoTable3D(min_eta, max_eta)
         {
             for (size_t z = 0; z < TableSize; ++z)
@@ -1281,8 +796,7 @@ namespace
                     for (size_t x = 0; x < TableSize; ++x)
                     {
                         const float cos_theta = static_cast<float>(x) / (TableSize - 1);
-
-                        dir_table(x, y, z) = compute_directional_albedo<MDF>(eta, alpha, cos_theta);
+                        dir_table(x, y, z) = compute_directional_albedo(eta, alpha, cos_theta);
                     }
 
                     avg_table(y, z) = average_albedo(TableSize, &dir_table(0, y, z));
@@ -1293,7 +807,6 @@ namespace
       private:
         // Compute the albedo for a given outgoing direction.
         // See Physically Based Rendering, first edition, pp. 689-690.
-        template <typename MDF>
         float compute_directional_albedo(
             const float eta,
             const float alpha,
@@ -1312,41 +825,54 @@ namespace
             const Vector3f wo(sin_theta, cos_theta, 0.0f);
 
             float R = 0.0f;
-            const MDF mdf;
             const size_t SampleCount = 512;
 
             for (size_t i = 0; i < SampleCount; ++i)
             {
-                // Generate a uniform sample in [0,1)^3.
-                const size_t Bases[] = { 2, 3 };
-                const Vector3f s = hammersley_sequence<float, 3>(Bases, SampleCount, i);
+                // Generate a uniform sample in [0,1)^2.
+                const size_t Bases[] = { 2 };
+                const Vector2f s = hammersley_sequence<float, 2>(Bases, SampleCount, i);
 
-                Vector3f wi;
-                float value = 0.0f;
-                float probability = 0.0f;
+                // Compute the microfacet normal by sampling the MDF.
+                const Vector3f m = GGXMDF::sample(wo, s, alpha, alpha);
+                assert(m.y > 0.0f);
 
-                GlassBSDFImpl::do_sample(
-                    mdf,
-                    s,
-                    false,
-                    shading_basis,
-                    alpha,
-                    alpha,
-                    1.0f, // gamma
-                    1.0f, // reflection_color
-                    1.0f, // reflection_weight
-                    1.0f, // refraction_color
-                    1.0f, // refraction_weight
-                    eta,
-                    wo,
-                    wi,
-                    value,
-                    probability);
+                // Compute the Fresnel term.
+                const float rcp_eta = 1.0f / eta;
+                const float cos_wom = clamp(dot(wo, m), -1.0f, 1.0f);
 
-                if (probability < 1.0e-6f)
-                    continue;
+                float cos_theta_t;
+                const float F = fresnel_reflectance(cos_wom, rcp_eta, cos_theta_t);
 
-                R += value * abs(wi.y) / probability;
+                const float rcp_G1 =
+                    safe_rcp(GGXMDF::G1(wo, m, alpha, alpha), 1e-8f);
+
+                // Evaluate the reflection lobe.
+                {
+                    const Vector3f wi = improve_normalization(reflect(wo, m));
+
+                    if (wi.y * wo.y > 0.0f)
+                    {
+                        const float G = GGXMDF::G(wi, wo, m, alpha, alpha);
+                        R += F * G * rcp_G1;
+                    }
+                }
+
+                // Evaluate the transmission lobe.
+                {
+                    const Vector3f wi = refracted_direction(
+                        wo,
+                        m,
+                        cos_wom,
+                        cos_theta_t,
+                        rcp_eta);
+
+                    if (wi.y * wo.y <= 0.0f)
+                    {
+                        const float G = GGXMDF::G(wi, wo, m, alpha, alpha);
+                        R += (1.0f - F) * G * rcp_G1;
+                    }
+                }
             }
 
             return min(R / static_cast<float>(SampleCount), 1.0f);
@@ -1356,34 +882,19 @@ namespace
     struct GlassAlbedoTables
       : public NonCopyable
     {
-#ifdef COMPUTE_ALBEDO_TABLES
         GlassAlbedoTables()
-          : m_ggx(GGXMDF(), MinEta, MaxEta)
-          , m_ggx_rcp_eta(GGXMDF(), 1.0f / MaxEta, 1.0f / MinEta)
-          , m_beckmann(BeckmannMDF(), MinEta, MaxEta)
-          , m_beckmann_rcp_eta(BeckmannMDF(), 1.0f / MaxEta, 1.0f / MinEta)
+          : m_ggx(MinEta, MaxEta)
+          , m_ggx_rcp_eta(1.0f / MaxEta, 1.0f / MinEta)
         {
         }
-#else
-        GlassAlbedoTables()
-          : m_ggx(g_glass_ggx_albedo_table, MinEta, MaxEta)
-          , m_ggx_rcp_eta(g_glass_ggx_rcp_eta_albedo_table, 1.0f / MaxEta, 1.0f / MinEta)
-          , m_beckmann(g_glass_beckmann_albedo_table, MinEta, MaxEta)
-          , m_beckmann_rcp_eta(g_glass_beckmann_rcp_eta_albedo_table, 1.0f / MaxEta, 1.0f / MinEta)
-        {
-        }
-#endif
 
         GlassAlbedoTable m_ggx;
         GlassAlbedoTable m_ggx_rcp_eta;
-        GlassAlbedoTable m_beckmann;
-        GlassAlbedoTable m_beckmann_rcp_eta;
     };
 
     GlassAlbedoTables g_dir_albedo_tables;
 
     float get_dir_albedo(
-        const GGXMDF&       mdf,
         const float         eta,
         const float         roughness,
         const float         cos_theta)
@@ -1404,30 +915,7 @@ namespace
         }
     }
 
-    float get_dir_albedo(
-        const BeckmannMDF&  mdf,
-        const float         eta,
-        const float         roughness,
-        const float         cos_theta)
-    {
-        if (eta > 1.0f)
-        {
-            return g_dir_albedo_tables.m_beckmann.get_directional_albedo(
-                eta,
-                roughness,
-                cos_theta);
-        }
-        else
-        {
-            return g_dir_albedo_tables.m_beckmann_rcp_eta.get_directional_albedo(
-                eta,
-                roughness,
-                cos_theta);
-        }
-    }
-
     float get_avg_albedo(
-        const GGXMDF&       mdf,
         const float         eta,
         const float         roughness)
     {
@@ -1444,25 +932,7 @@ namespace
                 roughness);
         }
     }
-
-    float get_avg_albedo(
-        const BeckmannMDF&  mdf,
-        const float         eta,
-        const float         roughness)
-    {
-        if (eta > 1.0f)
-        {
-            return g_dir_albedo_tables.m_beckmann.get_average_albedo(
-                eta,
-                roughness);
-        }
-        else
-        {
-            return g_dir_albedo_tables.m_beckmann_rcp_eta.get_average_albedo(
-                eta,
-                roughness);
-        }
-    }
+#endif
 }
 
 
@@ -1491,20 +961,6 @@ Dictionary GlassBSDFFactory::get_model_metadata() const
 DictionaryArray GlassBSDFFactory::get_input_metadata() const
 {
     DictionaryArray metadata;
-
-    metadata.push_back(
-        Dictionary()
-            .insert("name", "mdf")
-            .insert("label", "Microfacet Distribution Function")
-            .insert("type", "enumeration")
-            .insert("items",
-                Dictionary()
-                    .insert("Beckmann", "beckmann")
-                    .insert("GGX", "ggx")
-                    .insert("STD", "std"))
-            .insert("use", "required")
-            .insert("default", "ggx"));
-
     metadata.push_back(
         Dictionary()
             .insert("name", "surface_transmittance")
@@ -1586,23 +1042,6 @@ DictionaryArray GlassBSDFFactory::get_input_metadata() const
                     .insert("value", "1.0")
                     .insert("type", "hard"))
             .insert("default", "0.15"));
-
-    metadata.push_back(
-        Dictionary()
-            .insert("name", "highlight_falloff")
-            .insert("label", "Highlight Falloff")
-            .insert("type", "numeric")
-            .insert("min",
-                Dictionary()
-                    .insert("value", "0.0")
-                    .insert("type", "hard"))
-            .insert("max",
-                Dictionary()
-                    .insert("value", "1.0")
-                    .insert("type", "hard"))
-            .insert("bounds", "hard")
-            .insert("use", "optional")
-            .insert("default", "0.4"));
 
     metadata.push_back(
         Dictionary()
@@ -1756,11 +1195,11 @@ auto_release_ptr<BSDF> GlassBSDFFactory::create(
 
 void write_glass_directional_albedo_tables(const char* directory)
 {
+#ifdef COMPUTE_ALBEDO_TABLES
     const bfs::path dir(directory);
 
-    const GGXMDF ggx;
-    const GlassAlbedoTable ggx_table(ggx, MinEta, MaxEta);
-    const GlassAlbedoTable ggx_rcp_eta_table(ggx, 1.0f / MaxEta, 1.0f / MinEta);
+    const GlassAlbedoTable ggx_table(MinEta, MaxEta);
+    const GlassAlbedoTable ggx_rcp_eta_table(1.0f / MaxEta, 1.0f / MinEta);
 
     ggx_table.write_table_to_image(
         dir / "glass_ggx_albedo_table.exr");
@@ -1773,22 +1212,7 @@ void write_glass_directional_albedo_tables(const char* directory)
     ggx_rcp_eta_table.write_table_to_cpp_array(
         dir / "glass_ggx_rcp_eta_albedo_table.cpp",
         "g_glass_ggx_rcp_eta_albedo_table");
-
-    const BeckmannMDF beckmann;
-    const GlassAlbedoTable beckmann_table(beckmann, MinEta, MaxEta);
-    const GlassAlbedoTable beckmann_rcp_eta_table(beckmann, 1.0f / MaxEta, 1.0f / MinEta);
-
-    beckmann_table.write_table_to_image(
-        dir / "glass_beckmann_albedo_table.exr");
-    beckmann_table.write_table_to_cpp_array(
-        dir / "glass_beckmann_albedo_table.cpp",
-        "g_glass_beckmann_albedo_table");
-
-    beckmann_rcp_eta_table.write_table_to_image(
-        dir / "glass_beckmann_rcp_eta_albedo_table.exr");
-    beckmann_rcp_eta_table.write_table_to_cpp_array(
-        dir / "glass_beckmann_rcp_eta_albedo_table.cpp",
-        "g_glass_beckmann_rcp_eta_albedo_table");
+#endif
 }
 
 }   // namespace renderer

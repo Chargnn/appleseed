@@ -27,10 +27,8 @@
 // THE SOFTWARE.
 //
 
-// appleseed.renderer headers.
-#include "renderer/api/version.h"
-
 // appleseed.foundation headers.
+#include "foundation/core/version.h"
 #include "foundation/platform/python.h"
 
 // Forward declarations.
@@ -65,7 +63,9 @@ void bind_project();
 void bind_quaternion();
 void bind_renderer_controller();
 void bind_scene();
+void bind_shader_compiler();
 void bind_shader_group();
+void bind_shader_query();
 void bind_surface_shader();
 void bind_texture();
 void bind_tile_callback();
@@ -108,7 +108,10 @@ extern "C" void bind_appleseed_python_classes()
     bind_bssrdf();
     bind_edf();
     bind_volume();
+
+    bind_shader_compiler();
     bind_shader_group();
+    bind_shader_query();
 
     bind_surface_shader();
     bind_material();

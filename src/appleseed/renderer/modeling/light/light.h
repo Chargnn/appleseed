@@ -78,8 +78,8 @@ class APPLESEED_DLLSYMBOL Light
 
     enum Flags
     {
-        CastIndirectLight = 1 << 0,         // does this light generate indirect lighting?
-        LightTreeCompatible = 1 << 1        // can this light be used by the LightTree?
+        CastIndirectLight = 1UL << 0,       // does this light generate indirect lighting?
+        LightTreeCompatible = 1UL << 1      // can this light be used by the LightTree?
     };
 
     // Retrieve the flags.
@@ -94,8 +94,6 @@ class APPLESEED_DLLSYMBOL Light
     // Get the light transformation.
     const foundation::Transformd& get_transform() const;
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
     bool on_frame_begin(
         const Project&                  project,
         const BaseGroup*                parent,

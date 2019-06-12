@@ -29,12 +29,11 @@
 
 // appleseed.cli headers.
 #include "commandlinehandler.h"
-#include "houdinitilecallbacks.h"
-#include "progresstilecallback.h"
 #include "stdouttilecallback.h"
 
 // appleseed.shared headers.
 #include "application/application.h"
+#include "application/progresstilecallback.h"
 #include "application/superlogger.h"
 
 // appleseed.renderer headers.
@@ -55,6 +54,7 @@
 #include "foundation/utility/benchmark.h"
 #include "foundation/utility/filter.h"
 #include "foundation/utility/log.h"
+#include "foundation/utility/searchpaths.h"
 #include "foundation/utility/string.h"
 #include "foundation/utility/test.h"
 
@@ -141,10 +141,21 @@ namespace
                 g_logger,
                 g_cl.m_verbose_unit_tests.is_set()));
 
-        TestResult result;
-
+        // Change current directory to the tests' root directory.
         const bf::path old_current_path =
             Application::change_current_directory_to_tests_root_path();
+
+        // Create unit tests output directories.
+        if (!Application::create_unit_tests_output_directories())
+        {
+            LOG_ERROR(
+                g_logger,
+                "failed to create unit tests output directories %s, aborting test execution.",
+                Application::get_unit_tests_output_path());
+            return false;
+        }
+
+        TestResult result;
 
         // Run test suites.
         if (g_cl.m_run_unit_tests.values().empty())
@@ -166,10 +177,10 @@ namespace
             }
         }
 
+        print_unit_test_result(result);
+
         // Restore the current directory.
         bf::current_path(old_current_path);
-
-        print_unit_test_result(result);
 
         return result.get_assertion_failure_count() == 0;
     }
@@ -254,20 +265,12 @@ namespace
             params.insert_path(
                 "uniform_pixel_renderer.samples",
                 g_cl.m_samples.values()[1]);
-
-            params.insert_path(
-                "adaptive_pixel_renderer.min_samples",
-                g_cl.m_samples.values()[0]);
-
-            params.insert_path(
-                "adaptive_pixel_renderer.max_samples",
-                g_cl.m_samples.values()[1]);
         }
 
         if (g_cl.m_passes.is_set())
         {
             params.insert_path(
-                "generic_frame_renderer.passes",
+                "passes",
                 g_cl.m_passes.values()[0]);
         }
 
@@ -296,19 +299,20 @@ namespace
         }
     }
 
-    void apply_frame_command_line_options(Project& project)
+    bool apply_frame_command_line_options(Project& project)
     {
         const Frame* frame = project.get_frame();
         assert(frame != nullptr);
 
-        ParamArray params = frame->get_parameters();
+        const ParamArray initial_params = frame->get_parameters();
+        ParamArray new_params = initial_params;
 
         if (g_cl.m_resolution.is_set())
         {
             const string resolution =
                   foundation::to_string(g_cl.m_resolution.values()[0]) + ' ' +
                   foundation::to_string(g_cl.m_resolution.values()[1]);
-            params.insert("resolution", resolution);
+            new_params.insert("resolution", resolution);
         }
 
         if (g_cl.m_window.is_set())
@@ -318,22 +322,79 @@ namespace
                   foundation::to_string(g_cl.m_window.values()[1]) + ' ' +
                   foundation::to_string(g_cl.m_window.values()[2]) + ' ' +
                   foundation::to_string(g_cl.m_window.values()[3]);
-            params.insert("crop_window", crop_window);
+            new_params.insert("crop_window", crop_window);
         }
 
         if (g_cl.m_noise_seed.is_set())
         {
             const uint32 noise_seed = static_cast<uint32>(g_cl.m_noise_seed.value());
-            params.insert("noise_seed", noise_seed);
+            new_params.insert("noise_seed", noise_seed);
         }
 
-        auto_release_ptr<Frame> new_frame(
-            FrameFactory::create(
-                frame->get_name(),
-                params,
-                frame->aovs()));
+        if (g_cl.m_output.is_set())
+        {
+            const char* file_path = g_cl.m_output.value().c_str();
+            new_params.insert("output_path", file_path);
+        }
 
-        project.set_frame(new_frame);
+        if (g_cl.m_checkpoint_create.is_set())
+        {
+            new_params.insert("checkpoint_create", true);
+
+            if (g_cl.m_checkpoint_create.values().empty() && !g_cl.m_output.is_set())
+            {
+                LOG_ERROR(
+                    g_logger,
+                    "output path must be specified if no path is given for %s",
+                    g_cl.m_checkpoint_create.get_name().c_str());
+                return false;
+            }
+
+            new_params.insert(
+                "checkpoint_create_path",
+                !g_cl.m_checkpoint_create.values().empty()
+                    ? g_cl.m_checkpoint_create.value()
+                    : "");
+        }
+
+        if (g_cl.m_checkpoint_resume.is_set())
+        {
+            new_params.insert("checkpoint_resume", true);
+
+            if (g_cl.m_checkpoint_resume.values().empty() && !g_cl.m_output.is_set())
+            {
+                LOG_ERROR(
+                    g_logger,
+                    "output path must be specified if no path is given for %s",
+                    g_cl.m_checkpoint_resume.get_name().c_str());
+                return false;
+            }
+
+            new_params.insert(
+                "checkpoint_resume_path",
+                !g_cl.m_checkpoint_resume.values().empty()
+                    ? g_cl.m_checkpoint_resume.value()
+                    : "");
+        }
+
+        if (g_cl.m_passes.is_set())
+            new_params.insert_path("passes", g_cl.m_passes.values()[0]);
+
+        if (new_params != initial_params)
+        {
+            LOG_DEBUG(
+                g_logger,
+                "command line parameters require frame \"%s\" to be recreated.",
+                frame->get_name());
+
+            project.set_frame(
+                FrameFactory::create(
+                    frame->get_name(),
+                    new_params,
+                    frame->aovs()));
+        }
+
+        return true;
     }
 
     void apply_visibility_command_line_options_recursive(
@@ -374,15 +435,18 @@ namespace
         }
     }
 
-    void apply_command_line_options(Project& project, ParamArray& params)
+    bool apply_command_line_options(Project& project, ParamArray& params)
     {
         // Apply command line options that alter renderer settings.
         apply_rendering_settings_command_line_options(params);
         apply_custom_parameter_command_line_options(params);
 
         // Apply command line options that alter the project.
-        apply_frame_command_line_options(project);
+        if (!apply_frame_command_line_options(project))
+            return false;
         apply_visibility_command_line_options(project);
+
+        return true;
     }
 
 #if defined __APPLE__ || defined _WIN32
@@ -450,9 +514,7 @@ namespace
         params.merge(configuration->get_parameters());
 
         // Apply the command line options.
-        apply_command_line_options(project, params);
-
-        return true;
+        return apply_command_line_options(project, params);
     }
 
     bool is_progressive_render(const ParamArray& params)
@@ -475,23 +537,7 @@ namespace
 
         // Create the tile callback factory.
         unique_ptr<ITileCallbackFactory> tile_callback_factory;
-        if (g_cl.m_send_to_mplay.is_set())
-        {
-            tile_callback_factory.reset(
-                new MPlayTileCallbackFactory(
-                    project_filename.c_str(),
-                    is_progressive_render(params),
-                    g_logger));
-        }
-        else if (g_cl.m_send_to_hrmanpipe.is_set())
-        {
-            tile_callback_factory.reset(
-                new HRmanPipeTileCallbackFactory(
-                    g_cl.m_send_to_hrmanpipe.value(),
-                    is_progressive_render(params),
-                    g_logger));
-        }
-        else if (g_cl.m_send_to_stdout.is_set())
+        if (g_cl.m_send_to_stdout.is_set())
         {
             tile_callback_factory.reset(
                 new StdOutTileCallbackFactory(
@@ -503,16 +549,21 @@ namespace
             if (params.get_optional<string>("frame_renderer", "") != "progressive")
             {
                 tile_callback_factory.reset(
-                    new ProgressTileCallbackFactory(g_logger));
+                    new ProgressTileCallbackFactory(
+                        global_logger(),
+                        params.get_optional<size_t>("passes", 1)));
             }
         }
+
+        SearchPaths resource_search_paths;
+        Application::initialize_resource_search_paths(resource_search_paths);
 
         // Create the master renderer.
         DefaultRendererController renderer_controller;
         MasterRenderer renderer(
             project.ref(),
             params,
-            &renderer_controller,
+            resource_search_paths,
             tile_callback_factory.get());
 
         // Render the frame.
@@ -521,11 +572,11 @@ namespace
         if (params.get_optional<bool>("background_mode", true))
         {
             ProcessPriorityContext background_context(ProcessPriorityLow, &g_logger);
-            rendering_result = renderer.render();
+            rendering_result = renderer.render(renderer_controller);
         }
         else
         {
-            rendering_result = renderer.render();
+            rendering_result = renderer.render(renderer_controller);
         }
         if (rendering_result.m_status != MasterRenderer::RenderingResult::Succeeded)
             return false;
@@ -622,12 +673,15 @@ namespace
         if (!configure_project(project.ref(), params))
             return false;
 
+        SearchPaths resource_search_paths;
+        Application::initialize_resource_search_paths(resource_search_paths);
+
         // Create the master renderer.
         DefaultRendererController renderer_controller;
         MasterRenderer renderer(
             project.ref(),
             params,
-            &renderer_controller);
+            resource_search_paths);
 
         double total_time_seconds, render_time_seconds;
         {
@@ -635,13 +689,13 @@ namespace
             ProcessPriorityContext benchmark_context(ProcessPriorityHigh, &g_logger);
 
             // Render a first time.
-            auto result = renderer.render();
+            auto result = renderer.render(renderer_controller);
             if (result.m_status != MasterRenderer::RenderingResult::Succeeded)
                 return false;
             total_time_seconds = result.m_render_time;
 
             // Render a second time.
-            result = renderer.render();
+            result = renderer.render(renderer_controller);
             if (result.m_status != MasterRenderer::RenderingResult::Succeeded)
                 return false;
             render_time_seconds = result.m_render_time;
@@ -670,7 +724,7 @@ namespace
 // Entry point of appleseed.cli.
 //
 
-int main(int argc, const char* argv[])
+int main(int argc, char* argv[])
 {
     // Enable memory tracking immediately as to catch as many leaks as possible.
     start_memory_tracking();

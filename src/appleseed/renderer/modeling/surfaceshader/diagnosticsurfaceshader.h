@@ -34,22 +34,23 @@
 #include "renderer/modeling/surfaceshader/surfaceshader.h"
 
 // appleseed.foundation headers.
-#include "foundation/platform/compiler.h"
 #include "foundation/utility/autoreleaseptr.h"
 #include "foundation/utility/kvpair.h"
 
 // appleseed.main headers.
 #include "main/dllsymbol.h"
 
-// Standard headers.
-#include <cstddef>
-
 // Forward declarations.
 namespace foundation    { class Dictionary; }
 namespace foundation    { class DictionaryArray; }
-namespace renderer      { class AOVAccumulatorContainer; }
+namespace foundation    { class IAbortSwitch; }
+namespace renderer      { class AOVComponents; }
+namespace renderer      { class BaseGroup; }
+namespace renderer      { class OnRenderBeginRecorder; }
 namespace renderer      { class ParamArray; }
 namespace renderer      { class PixelContext; }
+namespace renderer      { class Project; }
+namespace renderer      { class ShadingComponents; }
 namespace renderer      { class ShadingContext; }
 namespace renderer      { class ShadingPoint; }
 
@@ -67,8 +68,9 @@ class APPLESEED_DLLSYMBOL DiagnosticSurfaceShader
     // Available shading modes.
     enum ShadingMode
     {
-        Albedo,                     // shade according to the surface bsdf's albedo component
         Coverage,                   // shade according to pixel coverage
+        FacingRatio,                // shade according to the facing ratio
+        Albedo,                     // surface BSDF's albedo component
         Barycentric,                // shade according to barycentric coordinates
         UV,                         // shade according to UV coordinates
         Tangent,                    // shade according to the tangent vector
@@ -77,27 +79,25 @@ class APPLESEED_DLLSYMBOL DiagnosticSurfaceShader
         ShadingNormal,              // shade according to the (possibly modified) shading normal
         OriginalShadingNormal,      // shade according to the original shading normal
         WorldSpacePosition,         // shade according to the world space position
+        WorldSpaceVelocity,         // shade according to the world space point velocity
+        ScreenSpaceVelocity,        // shade according to the screen space point velocity
         Sides,                      // shade according to the surface side
         Depth,                      // shade according to distance from camera
-        ScreenSpaceWireframe,       // screen-space wireframe
         WorldSpaceWireframe,        // world-space wireframe
+        ScreenSpaceWireframe,       // screen-space wireframe
         AmbientOcclusion,           // ambient occlusion
+        Assemblies,                 // assign a unique color to each assembly
         AssemblyInstances,          // assign a unique color to each assembly instance
+        Objects,                    // assign a unique color to each object
         ObjectInstances,            // assign a unique color to each object instance
         Primitives,                 // assign a unique color to each primitive
         Materials,                  // assign a unique color to each material
         RaySpread,                  // shade according to the reflected ray spread
-        FacingRatio,                // shade according to the facing ratio
         ShadingModeCount            // number of shading modes -- keep last
     };
 
     static const foundation::KeyValuePair<const char*, ShadingMode> ShadingModeValues[];
     static const foundation::KeyValuePair<const char*, const char*> ShadingModeNames[];
-
-    // Constructor.
-    DiagnosticSurfaceShader(
-        const char*                 name,
-        const ParamArray&           params);
 
     // Delete this instance.
     void release() override;
@@ -105,33 +105,35 @@ class APPLESEED_DLLSYMBOL DiagnosticSurfaceShader
     // Return a string identifying the model of this surface shader.
     const char* get_model() const override;
 
+    bool on_render_begin(
+        const Project&              project,
+        const BaseGroup*            parent,
+        OnRenderBeginRecorder&      recorder,
+        foundation::IAbortSwitch*   abort_switch = nullptr) override;
+
     // Evaluate the shading at a given point.
     void evaluate(
         SamplingContext&            sampling_context,
         const PixelContext&         pixel_context,
         const ShadingContext&       shading_context,
         const ShadingPoint&         shading_point,
-        AOVAccumulatorContainer&    aov_accumulators,
-        ShadingResult&              shading_result) const override;
+        ShadingResult&              shading_result,
+        ShadingComponents&          shading_components,
+        AOVComponents&              aov_components) const override;
 
   private:
-    ShadingMode m_shading_mode;
-    double      m_ao_max_distance;
-    size_t      m_ao_samples;
+    friend class DiagnosticSurfaceShaderFactory;
 
-    void extract_parameters();
+    struct Impl;
+    Impl* impl;
 
-    static void set_result(
-        const foundation::Color3f&  color,
-        ShadingResult&              shading_result);
+    // Constructor.
+    DiagnosticSurfaceShader(
+        const char*                 name,
+        const ParamArray&           params);
 
-    static void set_result(
-        const foundation::Color4f&  color,
-        ShadingResult&              shading_result);
-
-    static void set_result(
-        const Spectrum&             value,
-        ShadingResult&              shading_result);
+    // Destructor.
+    ~DiagnosticSurfaceShader() override;
 };
 
 

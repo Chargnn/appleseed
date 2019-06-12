@@ -32,8 +32,6 @@
 #include "renderer/modeling/entity/entity.h"
 
 // appleseed.foundation headers.
-#include "foundation/math/aabb.h"
-#include "foundation/platform/compiler.h"
 #include "foundation/utility/autoreleaseptr.h"
 #include "foundation/utility/uid.h"
 
@@ -45,6 +43,7 @@
 
 // Forward declarations.
 namespace foundation    { class Image; }
+namespace foundation    { class ImageAttributes; }
 namespace renderer      { class AOVAccumulator; }
 namespace renderer      { class AOVAccumulatorContainer; }
 namespace renderer      { class Frame; }
@@ -91,6 +90,11 @@ class APPLESEED_DLLSYMBOL AOV
 
     // Apply any post-processing needed to the AOV image.
     virtual void post_process_image(const Frame& frame);
+
+    // Write image to OpenEXR file.
+    virtual bool write_images(
+        const char*                         file_path,
+        const foundation::ImageAttributes&  image_attributes) const;
 
   protected:
     friend class AOVAccumulatorContainer;

@@ -56,9 +56,13 @@ namespace renderer
 //
 // Environment Emittance Distribution Function (EDF).
 //
-// All direction vectors are unit-length and pointing toward the environment.
-// All vectors are expressed in world space.
-// All probability densities are measured with respect to solid angle.
+// Conventions:
+//
+//   * All direction vectors are expressed in world space.
+//
+//   * All direction vectors are unit-length and pointing toward the environment.
+//
+//   * All probability densities are measured with respect to solid angle.
 //
 
 class APPLESEED_DLLSYMBOL EnvironmentEDF
@@ -80,8 +84,6 @@ class APPLESEED_DLLSYMBOL EnvironmentEDF
     TransformSequence& transform_sequence();
     const TransformSequence& transform_sequence() const;
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
     bool on_frame_begin(
         const Project&              project,
         const BaseGroup*            parent,

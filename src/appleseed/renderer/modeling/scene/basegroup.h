@@ -44,6 +44,7 @@ namespace renderer      { class OnFrameBeginRecorder; }
 namespace renderer      { class OnRenderBeginRecorder; }
 namespace renderer      { class OSLShadingSystem; }
 namespace renderer      { class Project; }
+namespace renderer      { class ShaderCompiler; }
 
 namespace renderer
 {
@@ -55,12 +56,6 @@ namespace renderer
 class APPLESEED_DLLSYMBOL BaseGroup
 {
   public:
-    // Constructor.
-    explicit BaseGroup(Entity* parent = nullptr);
-
-    // Destructor.
-    ~BaseGroup();
-
     // Access the colors.
     ColorContainer& colors() const;
 
@@ -79,6 +74,7 @@ class APPLESEED_DLLSYMBOL BaseGroup
     // Create OSL shader groups and optimize them.
     bool create_optimized_osl_shader_groups(
         OSLShadingSystem&           shading_system,
+        const ShaderCompiler*       shader_compiler,
         foundation::IAbortSwitch*   abort_switch = nullptr);
 
     // Release internal OSL shader groups.
@@ -94,21 +90,26 @@ class APPLESEED_DLLSYMBOL BaseGroup
     void collect_asset_paths(foundation::StringArray& paths) const;
     void update_asset_paths(const foundation::StringDictionary& mappings);
 
-    // This method is called once before rendering.
-    // Returns true on success, false otherwise.
+    // Please refer to the documentation of Entity::on_render_begin().
     bool on_render_begin(
         const Project&              project,
         const BaseGroup*            parent,
         OnRenderBeginRecorder&      recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr);
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
+    // Please refer to the documentation of Entity::on_frame_begin().
     bool on_frame_begin(
         const Project&              project,
         const BaseGroup*            parent,
         OnFrameBeginRecorder&       recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr);
+
+  protected:
+    // Constructor.
+    explicit BaseGroup(Entity* parent = nullptr);
+
+    // Destructor.
+    ~BaseGroup();
 
   private:
     struct Impl;

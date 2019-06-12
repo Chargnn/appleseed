@@ -31,6 +31,7 @@
 
 // appleseed.studio headers.
 #include "mainwindow/rendering/cameracontroller.h"
+#include "mainwindow/rendering/materialdrophandler.h"
 #include "mainwindow/rendering/pixelcolortracker.h"
 #include "mainwindow/rendering/pixelinspectorhandler.h"
 #include "mainwindow/rendering/renderclipboardhandler.h"
@@ -56,6 +57,7 @@ namespace appleseed { namespace studio { class ProjectExplorer; } }
 namespace appleseed { namespace studio { class RenderWidget; } }
 namespace renderer  { class Entity; }
 namespace renderer  { class Project; }
+namespace renderer  { class RenderingManager; }
 class QComboBox;
 class QLabel;
 class QPoint;
@@ -78,9 +80,10 @@ class RenderTab
 
   public:
     RenderTab(
-        ProjectExplorer&                project_explorer,
-        renderer::Project&              project,
-        OCIO::ConstConfigRcPtr          ocio_config);
+        ProjectExplorer&        project_explorer,
+        renderer::Project&      project,
+        RenderingManager&       rendering_manager,
+        OCIO::ConstConfigRcPtr  ocio_config);
 
     RenderWidget* get_render_widget() const;
     CameraController* get_camera_controller() const;
@@ -106,8 +109,8 @@ class RenderTab
     void load_state(const State& state);
 
   signals:
-    void signal_save_raw_frame_and_aovs();
-    void signal_quicksave_raw_frame_and_aovs();
+    void signal_save_frame_and_aovs();
+    void signal_quicksave_frame_and_aovs();
     void signal_set_render_region(const QRect& rect);
     void signal_clear_render_region();
     void signal_render_widget_context_menu(const QPoint& point);
@@ -143,9 +146,11 @@ class RenderTab
 
     ProjectExplorer&                            m_project_explorer;
     renderer::Project&                          m_project;
+    RenderingManager&                           m_rendering_manager;
 
     std::unique_ptr<WidgetZoomHandler>          m_zoom_handler;
     std::unique_ptr<ScrollAreaPanHandler>       m_pan_handler;
+    std::unique_ptr<MaterialDropHandler>        m_material_drop_handler;
     std::unique_ptr<MouseCoordinatesTracker>    m_mouse_tracker;
     std::unique_ptr<PixelColorTracker>          m_pixel_color_tracker;
     std::unique_ptr<PixelInspectorHandler>      m_pixel_inspector_handler;

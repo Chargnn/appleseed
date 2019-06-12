@@ -34,18 +34,20 @@
 
 # Boost.
 if (NOT PYTHON_MAJOR_VERSION STREQUAL "2")
-    message (FATAL_ERROR "Python 2.x needed")
+    message (FATAL_ERROR "Python 2.x needed.")
 else ()
-    find_package (Boost 1.55 COMPONENTS python)
+    if (Boost_VERSION GREATER_EQUAL 106700)
+        find_package (Boost 1.61 REQUIRED COMPONENTS python27)
+    else ()
+        find_package (Boost 1.61 REQUIRED COMPONENTS python)
+    endif ()
 endif ()
 
 # OpenGL.
 find_package (OpenGL REQUIRED)
 
-# Qt 4.
-find_package (Qt4 REQUIRED)
-set (QT_USE_QTOPENGL TRUE)
-include (${QT_USE_FILE})
+# Qt 5.
+find_package (Qt5 REQUIRED COMPONENTS Concurrent Core OpenGL Widgets)
 
 
 #--------------------------------------------------------------------------------------------------
@@ -252,6 +254,8 @@ set (mainwindow_rendering_sources
     mainwindow/rendering/lightpathstab.h
     mainwindow/rendering/lightpathswidget.cpp
     mainwindow/rendering/lightpathswidget.h
+    mainwindow/rendering/materialdrophandler.cpp
+    mainwindow/rendering/materialdrophandler.h
     mainwindow/rendering/pixelcolortracker.cpp
     mainwindow/rendering/pixelcolortracker.h
     mainwindow/rendering/pixelinspectorhandler.cpp
@@ -282,6 +286,11 @@ source_group ("mainwindow\\rendering" FILES
 )
 
 set (mainwindow_sources
+    mainwindow/applicationsettingswindow.cpp
+    mainwindow/applicationsettingswindow.h
+    mainwindow/applicationsettingswindow.ui
+    mainwindow/collapsiblesectionwidget.cpp
+    mainwindow/collapsiblesectionwidget.h
     mainwindow/configurationmanagerwindow.cpp
     mainwindow/configurationmanagerwindow.h
     mainwindow/configurationmanagerwindow.ui
@@ -300,9 +309,6 @@ set (mainwindow_sources
     mainwindow/renderingsettingswindow.cpp
     mainwindow/renderingsettingswindow.h
     mainwindow/renderingsettingswindow.ui
-    mainwindow/settingswindow.cpp
-    mainwindow/settingswindow.h
-    mainwindow/settingswindow.ui
     mainwindow/statusbar.cpp
     mainwindow/statusbar.h
 )
@@ -437,7 +443,9 @@ set (appleseedpython_sources
     ../appleseed.python/bindquaternion.cpp
     ../appleseed.python/bindrenderercontroller.cpp
     ../appleseed.python/bindscene.cpp
+    ../appleseed.python/bindshadercompiler.cpp
     ../appleseed.python/bindshadergroup.cpp
+    ../appleseed.python/bindshaderquery.cpp
     ../appleseed.python/bindsurfaceshader.cpp
     ../appleseed.python/bindtexture.cpp
     ../appleseed.python/bindtilecallback.cpp
@@ -474,7 +482,7 @@ filter_list (
     ".*\\\\.ui"
 )
 
-QT4_WRAP_UI (appleseed.studio_generated_ui_files
+QT5_WRAP_UI (appleseed.studio_generated_ui_files
     ${appleseed.studio_ui_files}
 )
 
@@ -486,66 +494,7 @@ include_directories (${CMAKE_CURRENT_BINARY_DIR})
 #--------------------------------------------------------------------------------------------------
 
 set (moc_options
-    #
-    # Work around moc's parsing failures.
-    # See https://bugreports.qt.io/browse/QTBUG-22829
-    #
-    # BOOST_TT_HAS_OPERATOR_HPP_INCLUDED is already defined in the moc tool itself.
-    # See https://code.qt.io/cgit/qt/qt.git/tree/src/tools/moc/main.cpp#n191
-    #
-    -DBOOST_NO_TEMPLATE_PARTIAL_SPECIALIZATION
-    -DBOOST_TT_HAS_BIT_AND_HPP_INCLUDED
-    -DBOOST_TT_HAS_BIT_AND_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_BIT_OR_HPP_INCLUDED
-    -DBOOST_TT_HAS_BIT_OR_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_BIT_XOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_BIT_XOR_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_COMPLEMENT_HPP_INCLUDED
-    -DBOOST_TT_HAS_DEREFERENCE_HPP_INCLUDED
-    -DBOOST_TT_HAS_DIVIDES_HPP_INCLUDED
-    -DBOOST_TT_HAS_DIVIDES_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_EQUAL_TO_HPP_INCLUDED
-    -DBOOST_TT_HAS_GREATER_HPP_INCLUDED
-    -DBOOST_TT_HAS_GREATER_EQUAL_HPP_INCLUDED
-    -DBOOST_TT_HAS_LEFT_SHIFT_HPP_INCLUDED
-    -DBOOST_TT_HAS_LEFT_SHIFT_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_LESS_HPP_INCLUDED
-    -DBOOST_TT_HAS_LESS_EQUAL_HPP_INCLUDED
-    -DBOOST_TT_HAS_LOGICAL_AND_HPP_INCLUDED
-    -DBOOST_TT_HAS_LOGICAL_NOT_HPP_INCLUDED
-    -DBOOST_TT_HAS_LOGICAL_OR_HPP_INCLUDED
-    -DBOOST_TT_HAS_MINUS_HPP_INCLUDED
-    -DBOOST_TT_HAS_MINUS_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_MODULUS_HPP_INCLUDED
-    -DBOOST_TT_HAS_MODULUS_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_MULTIPLIES_HPP_INCLUDED
-    -DBOOST_TT_HAS_MULTIPLIES_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_NEGATE_HPP_INCLUDED
-    -DBOOST_TT_HAS_NEW_OPERATOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_NOT_EQUAL_TO_HPP_INCLUDED
-    -DBOOST_TT_HAS_NOTHROW_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_NOTHROW_CONSTRUCTOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_NOTHROW_COPY_HPP_INCLUDED
-    -DBOOST_TT_HAS_NOTHROW_DESTRUCTOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_OPERATOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_PLUS_HPP_INCLUDED
-    -DBOOST_TT_HAS_PLUS_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_POST_DECREMENT_HPP_INCLUDED
-    -DBOOST_TT_HAS_POST_INCREMENT_HPP_INCLUDED
-    -DBOOST_TT_HAS_PRE_DECREMENT_HPP_INCLUDED
-    -DBOOST_TT_HAS_PRE_INCREMENT_HPP_INCLUDED
-    -DBOOST_TT_HAS_RIGHT_SHIFT_HPP_INCLUDED
-    -DBOOST_TT_HAS_RIGHT_SHIFT_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_CONSTRUCTOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_COPY_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_DESTRUCTOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_MOVE_ASSIGN_HPP_INCLUDED
-    -DBOOST_TT_HAS_TRIVIAL_MOVE_CONSTRUCTOR_HPP_INCLUDED
-    -DBOOST_TT_HAS_UNARY_MINUS_HPP_INCLUDED
-    -DBOOST_TT_HAS_UNARY_PLUS_HPP_INCLUDED
-    -DBOOST_TT_HAS_VIRTUAL_DESTRUCTOR_HPP_INCLUDED
-    -DBOOST_PREDEF_VERSION_NUMBER_H
+    --no-notes
 )
 
 # Moc .h files.
@@ -554,7 +503,7 @@ filter_list (
     "${appleseed.studio_sources}"
     ".*\\\\.h"
 )
-QT4_WRAP_CPP (appleseed.studio_generated_moc_h_files
+QT5_WRAP_CPP (appleseed.studio_generated_moc_h_files
     ${appleseed.studio_h_files}
     OPTIONS ${moc_options}
 )
@@ -565,7 +514,7 @@ filter_list (
     "${appleseed.studio_sources}"
     ".*\\\\.cpp"
 )
-QT4_WRAP_CPP_CPLUSPLUS_FILES (appleseed.studio_generated_moc_cpp_files
+QT5_WRAP_CPP_CPLUSPLUS_FILES (appleseed.studio_generated_moc_cpp_files
     ${appleseed.studio_cpp_files}
     OPTIONS ${moc_options}
 )
@@ -575,7 +524,7 @@ QT4_WRAP_CPP_CPLUSPLUS_FILES (appleseed.studio_generated_moc_cpp_files
 # Compile Qt resource files.
 #--------------------------------------------------------------------------------------------------
 
-QT4_ADD_RESOURCES (appleseed.studio_resource_files
+QT5_ADD_RESOURCES (appleseed.studio_resource_files
     ${resources}
 )
 
@@ -590,6 +539,8 @@ add_executable (appleseed.studio
     ${appleseed.studio_generated_moc_h_files}
     ${appleseed.studio_resource_files}
 )
+
+set_target_properties (appleseed.studio PROPERTIES FOLDER "Applications")
 
 if (WIN32)
     set_target_properties (appleseed.studio PROPERTIES
@@ -637,7 +588,10 @@ target_link_libraries (appleseed.studio
     appleseed
     appleseed.shared
     ${Boost_LIBRARIES}
-    ${QT_LIBRARIES}
+    Qt5::Core
+    Qt5::Concurrent
+    Qt5::OpenGL
+    Qt5::Widgets
     ${OPENGL_LIBRARY}
     ${PYTHON_LIBRARIES}
 )
@@ -646,18 +600,18 @@ if (WITH_DISNEY_MATERIAL)
     link_against_seexpreditor (appleseed.studio)
 endif ()
 
-if (WIN32)
-    target_link_libraries (appleseed.studio
-        ${QT_QTMAIN_LIBRARY}
-    )
-endif ()
-
 
 #--------------------------------------------------------------------------------------------------
 # Post-build commands.
 #--------------------------------------------------------------------------------------------------
 
-add_custom_target (appleseed.studio.python.copy_py_files ALL)
+add_custom_target (
+    appleseed.studio.copy_py_files ALL
+    VERBATIM
+)
+
+set_target_properties (appleseed.studio.copy_py_files PROPERTIES FOLDER "Contents")
+set_target_progress_message (appleseed.studio.copy_py_files "Copying appleseed.studio Python files...")
 
 add_copy_studio_py_file_to_sandbox_py_module_command (${PROJECT_SOURCE_DIR}/src/appleseed.studio/python/studio/__init__.py appleseed.studio)
 add_copy_studio_py_file_to_sandbox_py_module_command (${PROJECT_SOURCE_DIR}/src/appleseed.studio/python/studio/ui.py appleseed.studio)
@@ -694,5 +648,5 @@ install (DIRECTORY ../../sandbox/studio
     DESTINATION .
 )
 
-install (DIRECTORY ../../sandbox/lib/python2.7/site-packages DESTINATION "lib/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}")
+install (DIRECTORY ../../sandbox/lib/python/site-packages DESTINATION "lib/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}")
 install (DIRECTORY python/studio DESTINATION "lib/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}/appleseed")

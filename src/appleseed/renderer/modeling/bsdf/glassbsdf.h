@@ -60,7 +60,6 @@ APPLESEED_DECLARE_INPUT_VALUES(GlassBSDFInputValues)
     Spectrum        m_reflection_tint;
     Spectrum        m_refraction_tint;
     float           m_roughness;
-    float           m_highlight_falloff;
     float           m_anisotropy;
     float           m_ior;
     Spectrum        m_volume_transmittance;
@@ -111,7 +110,7 @@ class APPLESEED_DLLSYMBOL GlassBSDFFactory
 };
 
 // Write the computed tables to OpenEXR images and C++ arrays.
-// Used in Renderer_Modeling_BSDF_EnergyCompensation unit test.
+// Used in Renderer_Modeling_BSDF_EnergyCompensation unit tests.
 void write_glass_directional_albedo_tables(const char* directory);
 
 }   // namespace renderer

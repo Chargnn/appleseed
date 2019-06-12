@@ -106,7 +106,7 @@ class ShadingRay
     DepthType                       m_depth;
     foundation::uint8               m_medium_count;
     bool                            m_has_differentials;
-    float                           m_max_roughness;
+    float                           m_min_roughness;
 
     // Constructors.
     ShadingRay();                   // only partially initialize the object
@@ -161,7 +161,7 @@ class ShadingRay
 inline ShadingRay::ShadingRay()
   : m_medium_count(0)
   , m_has_differentials(false)
-  , m_max_roughness(0.0f)
+  , m_min_roughness(0.0f)
 {
 }
 
@@ -177,7 +177,7 @@ inline ShadingRay::ShadingRay(
   , m_depth(depth)
   , m_medium_count(0)
   , m_has_differentials(false)
-  , m_max_roughness(0.0f)
+  , m_min_roughness(0.0f)
 {
 }
 
@@ -195,7 +195,7 @@ inline ShadingRay::ShadingRay(
   , m_depth(depth)
   , m_medium_count(0)
   , m_has_differentials(false)
-  , m_max_roughness(0.0f)
+  , m_min_roughness(0.0f)
 {
 }
 
@@ -259,20 +259,20 @@ namespace foundation
       public:
         static void do_poison(renderer::ShadingRay& ray)
         {
-            poison(ray.m_rx);
-            poison(ray.m_ry);
-            poison(ray.m_time.m_absolute);
-            poison(ray.m_time.m_normalized);
+            always_poison(ray.m_rx);
+            always_poison(ray.m_ry);
+            always_poison(ray.m_time.m_absolute);
+            always_poison(ray.m_time.m_normalized);
 
             for (size_t i = 0; i < renderer::ShadingRay::MaxMediumCount; ++i)
             {
-                poison(ray.m_media[i].m_object_instance);
-                poison(ray.m_media[i].m_material);
-                poison(ray.m_media[i].m_ior);
+                always_poison(ray.m_media[i].m_object_instance);
+                always_poison(ray.m_media[i].m_material);
+                always_poison(ray.m_media[i].m_ior);
             }
 
-            poison(ray.m_flags);
-            poison(ray.m_depth);
+            always_poison(ray.m_flags);
+            always_poison(ray.m_depth);
 
             // Don't poison m_medium_count or m_has_differentials since
             // they are properly initialized by the default constructor.

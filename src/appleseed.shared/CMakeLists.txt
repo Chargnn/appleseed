@@ -47,6 +47,8 @@ set (application_sources
     application/commandlinehandlerbase.cpp
     application/commandlinehandlerbase.h
     application/dllsymbol.h
+    application/progresstilecallback.cpp
+    application/progresstilecallback.h
     application/superlogger.cpp
     application/superlogger.h
 )
@@ -65,6 +67,8 @@ source_group ("application" FILES
 add_library (appleseed.shared SHARED
     ${appleseed.shared_sources}
 )
+
+set_target_properties (appleseed.shared PROPERTIES FOLDER "Core")
 
 
 #--------------------------------------------------------------------------------------------------

@@ -32,7 +32,6 @@
 // appleseed.renderer headers.
 #include "renderer/global/globallogger.h"
 #include "renderer/modeling/frame/frame.h"
-#include "renderer/modeling/postprocessingstage/colormapdata.h"
 #include "renderer/modeling/postprocessingstage/postprocessingstage.h"
 #include "renderer/modeling/project/project.h"
 #include "renderer/utility/messagecontext.h"
@@ -40,6 +39,9 @@
 // appleseed.foundation headers.
 #include "foundation/image/canvasproperties.h"
 #include "foundation/image/color.h"
+#include "foundation/image/colormap.h"
+#include "foundation/image/colormapdata.h"
+#include "foundation/image/conversion.h"
 #include "foundation/image/genericimagefilereader.h"
 #include "foundation/image/image.h"
 #include "foundation/image/text/textrenderer.h"
@@ -138,15 +140,15 @@ namespace
                     context);
 
             if (color_map == "inferno")
-                set_palette_from_array(InfernoColorMap, countof(InfernoColorMap) / 3);
+                m_color_map.set_palette_from_array(InfernoColorMapLinearRGB, countof(InfernoColorMapLinearRGB) / 3);
             else if (color_map == "jet")
-                set_palette_from_array(JetColorMap, countof(JetColorMap) / 3);
+                m_color_map.set_palette_from_array(JetColorMapLinearRGB, countof(JetColorMapLinearRGB) / 3);
             else if (color_map == "magma")
-                set_palette_from_array(MagmaColorMap, countof(MagmaColorMap) / 3);
+                m_color_map.set_palette_from_array(MagmaColorMapLinearRGB, countof(MagmaColorMapLinearRGB) / 3);
             else if (color_map == "plasma")
-                set_palette_from_array(PlasmaColorMap, countof(PlasmaColorMap) / 3);
+                m_color_map.set_palette_from_array(PlasmaColorMapLinearRGB, countof(PlasmaColorMapLinearRGB) / 3);
             else if (color_map == "viridis")
-                set_palette_from_array(ViridisColorMap, countof(ViridisColorMap) / 3);
+                m_color_map.set_palette_from_array(ViridisColorMapLinearRGB, countof(ViridisColorMapLinearRGB) / 3);
             else
             {
                 assert(color_map == "custom");
@@ -201,11 +203,11 @@ namespace
 
             if (m_auto_range)
             {
-                Color4f min_color, max_color;
-                find_min_max(frame, min_color, max_color);
-
-                min_luminance = luminance(min_color.rgb());
-                max_luminance = luminance(max_color.rgb());
+                m_color_map.find_min_max_relative_luminance(
+                    frame.image(),
+                    frame.get_crop_window(),
+                    min_luminance,
+                    max_luminance);
             }
             else
             {
@@ -226,7 +228,11 @@ namespace
             if (m_render_isolines)
                 collect_isoline_segments(isoline_segments, frame, min_luminance, max_luminance);
 
-            remap_colors(frame, min_luminance, max_luminance);
+            m_color_map.remap_relative_luminance(
+                frame.image(),
+                frame.get_crop_window(),
+                min_luminance,
+                max_luminance);
 
             if (m_render_isolines)
                 render_isoline_segments(frame, isoline_segments);
@@ -262,7 +268,7 @@ namespace
 
         typedef vector<Segment> SegmentVector;
 
-        vector<Color3f>     m_palette;
+        ColorMap            m_color_map;
         bool                m_auto_range;
         float               m_range_min;
         float               m_range_max;
@@ -271,73 +277,15 @@ namespace
         bool                m_render_isolines;
         float               m_line_thickness;
 
-        //
-        // Color mapping.
-        //
-
-        void set_palette_from_array(const float* values, const size_t entry_count)
-        {
-            m_palette.resize(entry_count);
-
-            for (size_t i = 0; i < entry_count; ++i)
-            {
-                m_palette[i] =
-                    Color3f(
-                        values[i * 3 + 0],
-                        values[i * 3 + 1],
-                        values[i * 3 + 2]);
-            }
-        }
-
-        void set_palette_from_image_file(const string& filepath)
+        void set_palette_from_image_file(const string& file_path)
         {
             GenericImageFileReader reader;
-            unique_ptr<Image> image(reader.read(filepath.c_str()));
+            unique_ptr<Image> image(reader.read(file_path.c_str()));
 
-            const size_t image_width = image->properties().m_canvas_width;
-            m_palette.resize(image_width);
+            if (!is_linear_image_file_format(file_path))
+                convert_srgb_to_linear_rgb(*image);
 
-            for (size_t i = 0; i < image_width; ++i)
-                image->get_pixel(i, 0, m_palette[i]);
-        }
-
-        Color3f evaluate_palette(float x) const
-        {
-            assert(m_palette.size() > 1);
-
-            x *= m_palette.size() - 1;
-
-            const size_t ix = min(truncate<size_t>(x), m_palette.size() - 2);
-            const float w = x - ix;
-
-            return lerp(m_palette[ix], m_palette[ix + 1], w);
-        }
-
-        void remap_colors(Frame& frame, const float min_luminance, const float max_luminance) const
-        {
-            if (min_luminance == max_luminance)
-            {
-                for_each_pixel(frame, [this](Color4f& color)
-                {
-                    color.rgb() = evaluate_palette(0.0f);
-                });
-            }
-            else
-            {
-                for_each_pixel(frame, [this, min_luminance, max_luminance](Color4f& color)
-                {
-                    const float col_luminance = luminance(color.rgb());
-
-                    const float x =
-                        saturate(
-                            inverse_lerp(
-                                min_luminance,
-                                max_luminance,
-                                col_luminance));
-
-                    color.rgb() = evaluate_palette(x);
-                });
-            }
+            m_color_map.set_palette_from_image_file(*image.get());
         }
 
         void add_legend_bar(Frame& frame, const float min_luminance, const float max_luminance) const
@@ -381,19 +329,15 @@ namespace
             // Draw legend bar.
             for (size_t y = y0; y < y1; ++y)
             {
-                for (size_t x = x0; x < x1; ++x)
-                {
-                    const float val =
-                        y0 == y1 - 1
-                            ? 0.0f
-                            : fit<size_t, float>(y, y0, y1 - 1, 1.0f, 0.0f);
+                const float val =
+                    y0 == y1 - 1
+                        ? 0.0f
+                        : fit<size_t, float>(y, y0, y1 - 1, 1.0f, 0.0f);
 
-                    image.set_pixel(
-                        x, y,
-                        Color4f(
-                            evaluate_palette(val),
-                            1.0f));
-                }
+                const Color4f color(m_color_map.evaluate_palette(val), 1.0f);
+
+                for (size_t x = x0; x < x1; ++x)
+                    image.set_pixel(x, y, color);
             }
 
             // Handle more edge cases.
@@ -515,10 +459,10 @@ namespace
             const float f11 = get_pixel_value(image, props, x + 1, y + 1);
 
             // Corners are numbered clockwise starting in top-left corner.
-            const size_t b00 = f00 > isovalue ? 1 << 3 : 0;
-            const size_t b10 = f10 > isovalue ? 1 << 2 : 0;
-            const size_t b11 = f11 > isovalue ? 1 << 1 : 0;
-            const size_t b01 = f01 > isovalue ? 1 << 0 : 0;
+            const size_t b00 = f00 > isovalue ? 1UL << 3 : 0;
+            const size_t b10 = f10 > isovalue ? 1UL << 2 : 0;
+            const size_t b11 = f11 > isovalue ? 1UL << 1 : 0;
+            const size_t b01 = f01 > isovalue ? 1UL << 0 : 0;
             const size_t mask = b00 + b10 + b11 + b01;
 
             // Compute middle of top edge.

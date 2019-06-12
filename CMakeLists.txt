@@ -6,7 +6,7 @@
 # This software is released under the MIT license.
 #
 # Copyright (c) 2010-2013 Francois Beaune, Jupiter Jazz Limited
-# Copyright (c) 2014-2018 Francois Beaune, The appleseedhq Organization
+# Copyright (c) 2014-2019 Francois Beaune, The appleseedhq Organization
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 # CMake configuration.
 #--------------------------------------------------------------------------------------------------
 
-cmake_minimum_required (VERSION 2.8 FATAL_ERROR)
+cmake_minimum_required (VERSION 3.9 FATAL_ERROR)
 
 cmake_policy (SET CMP0008 NEW)      # libraries linked by full-path must have a valid library file name
 
@@ -47,6 +47,8 @@ endif ()
 if (POLICY CMP0043)
     cmake_policy (SET CMP0043 OLD)  # consume the content of the suffixed COMPILE_DEFINITIONS_<CONFIG>
 endif ()
+
+set_property (GLOBAL PROPERTY USE_FOLDERS ON)
 
 include (cmake/utilities.txt)
 
@@ -95,6 +97,28 @@ endif ()
 
 
 #--------------------------------------------------------------------------------------------------
+# Compiler features.
+#--------------------------------------------------------------------------------------------------
+
+set (CMAKE_CXX_STANDARD 11)
+
+include (WriteCompilerDetectionHeader)
+
+write_compiler_detection_header (
+    FILE ${PROJECT_SOURCE_DIR}/src/appleseed/foundation/platform/compilerfeatures.h
+    PREFIX APPLESEED
+    COMPILERS GNU Clang MSVC AppleClang
+    FEATURES
+        cxx_final
+        cxx_noexcept
+        cxx_constexpr
+        cxx_defaulted_functions
+        cxx_deleted_functions
+        cxx_generalized_initializers
+)
+
+
+#--------------------------------------------------------------------------------------------------
 # Build options.
 #--------------------------------------------------------------------------------------------------
 
@@ -105,20 +129,35 @@ option (WITH_PYTHON2_BINDINGS               "Build Python bindings for Python 2"
 option (WITH_PYTHON3_BINDINGS               "Build Python bindings for Python 3"                        OFF)
 option (WITH_DISNEY_MATERIAL                "Build Disney material"                                     OFF)
 option (WITH_EMBREE                         "Include support for Embree intersection backend"           OFF)
-option (WITH_HEADERS                        "Install header files (to build samples)"                   ON)
-option (WITH_SAMPLES                        "Install sample files (requires headers)"                   ON)
-option (WITH_TESTS                          "Install unit tests and benchmarks"                         ON)
+option (WITH_GPU                            "Build GPU support"                                         OFF)
+option (WITH_SPECTRAL_SUPPORT               "Include support for spectral colors"                       ON)
 option (WITH_DOXYGEN                        "Generate API reference with Doxygen"                       ON)
+option (INSTALL_HEADERS                     "Install header files"                                      ON)
+option (INSTALL_TESTS                       "Install unit tests and benchmarks"                         ON)
+option (INSTALL_API_EXAMPLES                "Install API examples (requires header files)"              ON)
 
-option (USE_EXTERNAL_EMBREE                 "Use external Embree library"                               OFF)
-option (USE_EXTERNAL_EXR                    "Use external OpenEXR library"                              OFF)
-option (USE_EXTERNAL_OCIO                   "Use external OpenColorIO library"                          OFF)
-option (USE_EXTERNAL_OIIO                   "Use external OpenImageIO library"                          OFF)
-option (USE_EXTERNAL_OSL                    "Use external OpenShadingLanguage library"                  OFF)
-option (USE_EXTERNAL_PNG                    "Use external libpng library"                               OFF)
-option (USE_EXTERNAL_SEEXPR                 "Use external SeExpr library"                               OFF)
-option (USE_EXTERNAL_XERCES                 "Use external Xerces library"                               OFF)
-option (USE_EXTERNAL_ZLIB                   "Use external zlib library"                                 OFF)
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    option (USE_FIND_PACKAGE_FOR_EMBREE     "Use find_package() for Embree library"                     OFF)
+    option (USE_FIND_PACKAGE_FOR_EXR        "Use find_package() for OpenEXR library"                    OFF)
+    option (USE_FIND_PACKAGE_FOR_LZ4        "Use find_package() for LZ4 library"                        OFF)
+    option (USE_FIND_PACKAGE_FOR_OCIO       "Use find_package() for OpenColorIO library"                OFF)
+    option (USE_FIND_PACKAGE_FOR_OIIO       "Use find_package() for OpenImageIO library"                OFF)
+    option (USE_FIND_PACKAGE_FOR_OSL        "Use find_package() for OpenShadingLanguage library"        OFF)
+    option (USE_FIND_PACKAGE_FOR_SEEXPR     "Use find_package() for SeExpr library"                     OFF)
+    option (USE_FIND_PACKAGE_FOR_XERCES     "Use find_package() for Xerces library"                     OFF)
+    option (USE_FIND_PACKAGE_FOR_ZLIB       "Use find_package() for zlib library"                       OFF)
+else ()
+    set (USE_FIND_PACKAGE_FOR_EMBREE        ON)
+    set (USE_FIND_PACKAGE_FOR_EXR           ON)
+    set (USE_FIND_PACKAGE_FOR_LZ4           ON)
+    set (USE_FIND_PACKAGE_FOR_OCIO          ON)
+    set (USE_FIND_PACKAGE_FOR_OIIO          ON)
+    set (USE_FIND_PACKAGE_FOR_OSL           ON)
+    set (USE_FIND_PACKAGE_FOR_PNG           ON)
+    set (USE_FIND_PACKAGE_FOR_SEEXPR        ON)
+    set (USE_FIND_PACKAGE_FOR_XERCES        ON)
+    set (USE_FIND_PACKAGE_FOR_ZLIB          ON)
+endif ()
 
 option (USE_STATIC_BOOST                    "Use static Boost libraries"                                ON)
 option (USE_STATIC_EMBREE                   "Use static Embree libraries"                               ON)
@@ -147,6 +186,11 @@ else ()
     # Unknown architecture: No SIMD.
 endif ()
 
+if (WITH_SPECTRAL_SUPPORT)
+    set (APPLESEED_WITH_SPECTRAL_SUPPORT ON)
+    add_definitions (-DAPPLESEED_WITH_SPECTRAL_SUPPORT)
+endif ()
+
 
 #--------------------------------------------------------------------------------------------------
 # Common settings.
@@ -167,7 +211,7 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|FreeBSD")
     include (cmake/config/linux-gcc-clang.txt)
 else ()
-    message (FATAL_ERROR "Unsupported platform or compiler (CMAKE_SYSTEM_NAME is \"${CMAKE_SYSTEM_NAME}\"). "
+    message (FATAL_ERROR "Unsupported system (CMAKE_SYSTEM_NAME is \"${CMAKE_SYSTEM_NAME}\"). "
                          "Edit ${CMAKE_CURRENT_LIST_FILE} to add support for it.")
 endif ()
 
@@ -177,7 +221,7 @@ endif ()
 #--------------------------------------------------------------------------------------------------
 
 set (appleseed_version_major    2)
-set (appleseed_version_minor    0)
+set (appleseed_version_minor    1)
 set (appleseed_version_patch    0)
 set (appleseed_version_maturity beta)
 
@@ -195,7 +239,7 @@ if (USE_STATIC_BOOST)
     set (Boost_USE_STATIC_LIBS TRUE)
 endif ()
 
-find_package (Boost 1.55 REQUIRED COMPONENTS atomic chrono date_time filesystem regex system thread wave)
+find_package (Boost 1.61 REQUIRED COMPONENTS atomic chrono date_time filesystem regex system thread wave)
 
 add_definitions (-DBOOST_FILESYSTEM_VERSION=3 -DBOOST_FILESYSTEM_NO_DEPRECATED)
 
@@ -210,53 +254,68 @@ link_directories (${Boost_LIBRARY_DIRS})
 
 
 #--------------------------------------------------------------------------------------------------
-# Find external packages.
+# Find packages.
 #--------------------------------------------------------------------------------------------------
 
-if (USE_EXTERNAL_ZLIB)
-    find_package (ZLIB REQUIRED)
+if (WITH_EMBREE)
+    set (APPLESEED_WITH_EMBREE ON)
+    add_definitions (-DAPPLESEED_WITH_EMBREE)
+    if (USE_STATIC_EMBREE)
+        add_definitions (-DEMBREE_STATIC_LIB)
+    endif ()
+    if (USE_FIND_PACKAGE_FOR_EMBREE)
+        find_package (Embree REQUIRED)
+    endif ()
 endif ()
 
-if (USE_EXTERNAL_PNG)
-    find_package (PNG REQUIRED)
+if (WITH_GPU)
+    set (APPLESEED_WITH_GPU ON)
+    add_definitions (-DAPPLESEED_WITH_GPU)
+
+    find_package (CUDA 9.0 REQUIRED)
+    find_package (OptiX REQUIRED)
 endif ()
 
-if (USE_EXTERNAL_EXR)
+if (USE_FIND_PACKAGE_FOR_EXR)
     find_package (Imath REQUIRED)
     find_package (OpenEXR REQUIRED)
 endif ()
 
-if (USE_EXTERNAL_XERCES)
-    add_definitions (-DAPPLESEED_WITH_EXTERNAL_XERCES)
-    find_package (Xerces REQUIRED)
-endif ()
-
-if (USE_STATIC_OIIO)
-    add_definitions (-DOIIO_STATIC_BUILD)
-endif ()
-if (USE_EXTERNAL_OIIO)
-    find_package (OpenImageIO REQUIRED)
+if (USE_FIND_PACKAGE_FOR_LZ4)
+    find_package (LZ4 REQUIRED)
 endif ()
 
 if (WITH_STUDIO)
     if (USE_STATIC_OCIO)
         add_definitions (-DOCIO_STATIC_BUILD)
     endif ()
-    if (USE_EXTERNAL_OCIO)
+    if (USE_FIND_PACKAGE_FOR_OCIO)
         find_package (OpenColorIO REQUIRED)
     endif ()
 endif ()
 
-if (USE_STATIC_OSL)
-    add_definitions (-DOSL_STATIC_LIBRARY)
+if (USE_STATIC_OIIO)
+    add_definitions (-DOIIO_STATIC_BUILD)
 endif ()
-if (USE_EXTERNAL_OSL)
+if (USE_FIND_PACKAGE_FOR_OIIO)
+    find_package (OpenImageIO REQUIRED)
+endif ()
+
+if (USE_STATIC_OSL)
+    add_definitions (-DOSL_STATIC_BUILD)
+endif ()
+if (USE_FIND_PACKAGE_FOR_OSL)
     find_package (OSL REQUIRED)
 endif ()
 
+if (USE_FIND_PACKAGE_FOR_PNG)
+    find_package (PNG REQUIRED)
+endif ()
+
 if (WITH_DISNEY_MATERIAL)
+    set (APPLESEED_WITH_DISNEY_MATERIAL ON)
     add_definitions (-DAPPLESEED_WITH_DISNEY_MATERIAL)
-    if (USE_EXTERNAL_SEEXPR)
+    if (USE_FIND_PACKAGE_FOR_SEEXPR)
         find_package (SeExpr REQUIRED)
         if (WITH_STUDIO)
             find_package (SeExprEditor REQUIRED)
@@ -264,14 +323,13 @@ if (WITH_DISNEY_MATERIAL)
     endif ()
 endif ()
 
-if (WITH_EMBREE)
-    add_definitions (-DAPPLESEED_WITH_EMBREE)
-    if (USE_STATIC_EMBREE)
-        add_definitions (-DEMBREE_STATIC_LIB)
-    endif ()
-    if (USE_EXTERNAL_EMBREE)
-        find_package (Embree REQUIRED)
-    endif ()
+if (USE_FIND_PACKAGE_FOR_XERCES)
+    add_definitions (-DAPPLESEED_WITH_EXTERNAL_XERCES)
+    find_package (Xerces REQUIRED)
+endif ()
+
+if (USE_FIND_PACKAGE_FOR_ZLIB)
+    find_package (ZLIB REQUIRED)
 endif ()
 
 
@@ -282,23 +340,20 @@ endif ()
 # Common include paths.
 include_directories (
     src/thirdparty/bcd
-    src/thirdparty/lz4
+    src/thirdparty/glad/include
+    src/thirdparty/murmurhash3
     src/appleseed
 )
 
-if (USE_EXTERNAL_ZLIB)
-    include_directories (${ZLIB_INCLUDE_DIRS})
-else ()
-    include_directories (${APPLESEED_DEPS_STAGE_DIR}/zlib-debug/include)
+if (WITH_EMBREE)
+    if (USE_FIND_PACKAGE_FOR_EMBREE)
+        include_directories (${EMBREE_INCLUDE_DIRS})
+    else ()
+        include_directories (${APPLESEED_DEPS_STAGE_DIR}/embree-debug/include)
+    endif ()
 endif ()
 
-if (USE_EXTERNAL_PNG)
-    include_directories (${PNG_INCLUDE_DIR})
-else ()
-    include_directories (${APPLESEED_DEPS_STAGE_DIR}/libpng-debug/include)
-endif ()
-
-if (USE_EXTERNAL_EXR)
+if (USE_FIND_PACKAGE_FOR_EXR)
     include_directories (
         ${IMATH_INCLUDE_DIRS}
         ${IMATH_INCLUDE_DIRS}/OpenEXR/
@@ -314,32 +369,32 @@ else ()
     )
 endif ()
 
-if (USE_EXTERNAL_XERCES)
-    include_directories (${XERCES_INCLUDE_DIRS})
+if (USE_FIND_PACKAGE_FOR_LZ4)
+    include_directories (${LZ4_INCLUDE_DIR})
 else ()
-    include_directories (${APPLESEED_DEPS_STAGE_DIR}/xerces-c-debug/include)
+    include_directories (${APPLESEED_DEPS_STAGE_DIR}/lz4-debug/include)
 endif ()
 
-if (USE_EXTERNAL_OIIO)
-    include_directories (${OPENIMAGEIO_INCLUDE_DIRS})
-else ()
-    include_directories (${APPLESEED_DEPS_STAGE_DIR}/oiio-debug/include)
-endif ()
-
-if (USE_EXTERNAL_OCIO)
+if (USE_FIND_PACKAGE_FOR_OCIO)
     include_directories (${OPENCOLORIO_INCLUDE_DIRS})
 else ()
     include_directories (${APPLESEED_DEPS_STAGE_DIR}/ocio-debug/include)
 endif ()
 
-if (USE_EXTERNAL_OSL)
+if (USE_FIND_PACKAGE_FOR_OIIO)
+    include_directories (${OPENIMAGEIO_INCLUDE_DIRS})
+else ()
+    include_directories (${APPLESEED_DEPS_STAGE_DIR}/oiio-debug/include)
+endif ()
+
+if (USE_FIND_PACKAGE_FOR_OSL)
     include_directories (${OSL_INCLUDE_DIRS})
 else ()
     include_directories (${APPLESEED_DEPS_STAGE_DIR}/osl-debug/include)
 endif ()
 
 if (WITH_DISNEY_MATERIAL)
-    if (USE_EXTERNAL_SEEXPR)
+    if (USE_FIND_PACKAGE_FOR_SEEXPR)
         include_directories (${SEEXPR_INCLUDE_DIRS})
         if (WITH_STUDIO)
             include_directories (${SEEXPREDITOR_INCLUDE_DIRS})
@@ -349,13 +404,18 @@ if (WITH_DISNEY_MATERIAL)
     endif ()
 endif ()
 
-if (WITH_EMBREE)
-    if (NOT USE_EXTERNAL_EMBREE)
-        include_directories (${APPLESEED_DEPS_STAGE_DIR}/embree-debug/include/)
-    else ()
-        include_directories (${EMBREE_INCLUDE_DIRS})
-    endif ()
+if (USE_FIND_PACKAGE_FOR_XERCES)
+    include_directories (${XERCES_INCLUDE_DIRS})
+else ()
+    include_directories (${APPLESEED_DEPS_STAGE_DIR}/xerces-c-debug/include)
 endif ()
+
+if (USE_FIND_PACKAGE_FOR_ZLIB)
+    include_directories (${ZLIB_INCLUDE_DIRS})
+else ()
+    include_directories (${APPLESEED_DEPS_STAGE_DIR}/zlib-debug/include)
+endif ()
+
 
 #--------------------------------------------------------------------------------------------------
 # Preprocessor definitions.
@@ -384,6 +444,7 @@ endif ()
 # SIMD.
 if (is_x86)
     if (USE_AVX2)
+        set (APPLESEED_USE_AVX2 ON)
         set (preprocessor_definitions_common
             ${preprocessor_definitions_common}
             APPLESEED_USE_AVX2
@@ -391,6 +452,7 @@ if (is_x86)
         set (USE_AVX TRUE)
     endif ()
     if (USE_AVX)
+        set (APPLESEED_USE_AVX ON)
         set (preprocessor_definitions_common
             ${preprocessor_definitions_common}
             APPLESEED_USE_AVX
@@ -398,6 +460,7 @@ if (is_x86)
         set (USE_SSE42 TRUE)
     endif ()
     if (USE_SSE42)
+        set (APPLESEED_USE_SSE42 ON)
         set (preprocessor_definitions_common
             ${preprocessor_definitions_common}
             APPLESEED_USE_SSE42
@@ -405,6 +468,7 @@ if (is_x86)
         set (USE_SSE TRUE)
     endif ()
     if (USE_SSE)
+        set (APPLESEED_USE_SSE ON)
         set (preprocessor_definitions_common
             ${preprocessor_definitions_common}
             APPLESEED_USE_SSE
@@ -414,6 +478,7 @@ if (is_x86)
         endif ()
     endif ()
     if (USE_F16C)
+        set (APPLESEED_USE_F16C ON)
         set (preprocessor_definitions_common
             ${preprocessor_definitions_common}
             APPLESEED_USE_F16C
@@ -486,6 +551,14 @@ macro (append_custom_preprocessor_definitions target first_definition)
         COMPILE_DEFINITIONS_PROFILE ${definitions}
     )
 endmacro ()
+
+
+#--------------------------------------------------------------------------------------------------
+# Auto-generate build options header.
+#--------------------------------------------------------------------------------------------------
+
+configure_file (${PROJECT_SOURCE_DIR}/src/appleseed/foundation/core/buildoptions.h.in
+                ${PROJECT_SOURCE_DIR}/src/appleseed/foundation/core/buildoptions.h)
 
 
 #--------------------------------------------------------------------------------------------------
@@ -570,7 +643,8 @@ endmacro ()
 #--------------------------------------------------------------------------------------------------
 
 add_subdirectory (src/thirdparty/bcd)
-add_subdirectory (src/thirdparty/lz4)
+add_subdirectory (src/thirdparty/glad)
+add_subdirectory (src/thirdparty/murmurhash3)
 
 add_subdirectory (src/appleseed)
 add_subdirectory (src/appleseed.shaders)
@@ -596,17 +670,19 @@ if (WITH_PYTHON2_BINDINGS)
         list (GET PYTHON_VERSION_LIST 1 PYTHON_MINOR_VERSION)
     else ()
         # Default to latest Python 2 release if version string cannot be read.
-        message (STATUS "Cannot find Python version. Using 2.7 by default")
+        message (STATUS "Cannot find Python version; using Python 2.7 by default.")
         set (PYTHON_MAJOR_VERSION "2")
         set (PYTHON_MINOR_VERSION "7")
     endif ()
+endif ()
 
+if (WITH_PYTHON2_BINDINGS OR WITH_PYTHON3_BINDINGS)
     add_subdirectory (src/appleseed.python)
 endif ()
 
 if (WITH_STUDIO)
     if (NOT WITH_PYTHON2_BINDINGS)
-        message (FATAL_ERROR "WITH_PYTHON2_BINDINGS should be \"ON\" to build appleseed.studio")
+        message (FATAL_ERROR "Option WITH_PYTHON2_BINDINGS should be \"ON\" to build appleseed.studio.")
     endif ()
     add_subdirectory (src/appleseed.studio)
 endif ()
@@ -630,11 +706,15 @@ if (WITH_DOXYGEN)
 
     if (DOXYGEN_FOUND)
         configure_file (${PROJECT_SOURCE_DIR}/scripts/appleseed.doxyfile.in ${PROJECT_BINARY_DIR}/appleseed.doxyfile @ONLY)
+
         add_custom_target (
-            doc ${DOXYGEN_EXECUTABLE} ${PROJECT_BINARY_DIR}/appleseed.doxyfile
+            genarate_api_reference ${DOXYGEN_EXECUTABLE} ${PROJECT_BINARY_DIR}/appleseed.doxyfile
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            COMMENT "Generating API Reference with Doxygen" VERBATIM
+            VERBATIM
         )
+
+        set_target_properties (genarate_api_reference PROPERTIES FOLDER "Contents")
+        set_target_progress_message (genarate_api_reference "Generating API reference with Doxygen...")
     endif ()
 endif ()
 
@@ -644,12 +724,28 @@ endif ()
 #--------------------------------------------------------------------------------------------------
 
 install (
+    DIRECTORY
+        sandbox/docs
+        sandbox/icons
+        sandbox/settings
+        sandbox/shaders
+        sandbox/share
+        sandbox/stylesheets
+    DESTINATION .
+)
+
+install (
     FILES
         scripts/cleanmany.py
         scripts/convertmany.py
         scripts/rendermanager.py
         scripts/rendermany.py
         scripts/rendernode.py
+        ${OSL_COMPILER}
+        ${OSL_QUERY_INFO}
+        ${OSL_MAKETX}
+        ${OPENIMAGEIO_OIIOTOOL}
+        ${OPENIMAGEIO_IDIFF}
     DESTINATION bin
 )
 
@@ -661,52 +757,11 @@ install (
 )
 
 install (
-    FILES
-        ${OSL_COMPILER}
-        ${OSL_QUERY_INFO}
-        ${OSL_MAKETX}
-        ${OPENIMAGEIO_OIIOTOOL}
-    DESTINATION bin
-)
-
-install (
-    DIRECTORY sandbox/shaders
-    DESTINATION .
-)
-
-install (
-    DIRECTORY
-        sandbox/docs
-        sandbox/icons
-        sandbox/settings
-        sandbox/share
-        sandbox/stylesheets
-    DESTINATION .
-)
-
-install (
     CODE "FILE (MAKE_DIRECTORY ${CMAKE_INSTALL_PREFIX}/images)"
     CODE "FILE (MAKE_DIRECTORY ${CMAKE_INSTALL_PREFIX}/images/autosave)"
 )
 
-if (WITH_SAMPLES)
-    install (
-        DIRECTORY
-            sandbox/samples
-        DESTINATION .
-    )
-endif ()
-
-if (WITH_TESTS)
-    install (
-        DIRECTORY
-            "sandbox/tests/unit benchmarks"
-            "sandbox/tests/unit tests"
-        DESTINATION tests
-    )
-endif ()
-
-if (WITH_HEADERS)
+if (INSTALL_HEADERS)
     install (
         DIRECTORY src/appleseed/foundation
         DESTINATION include
@@ -723,5 +778,22 @@ if (WITH_HEADERS)
         DIRECTORY src/appleseed/renderer
         DESTINATION include
         FILES_MATCHING PATTERN "*.h"
+    )
+endif ()
+
+if (INSTALL_TESTS)
+    install (
+        DIRECTORY
+            "sandbox/tests/unit benchmarks"
+            "sandbox/tests/unit tests"
+        DESTINATION tests
+    )
+endif ()
+
+if (INSTALL_API_EXAMPLES)
+    install (
+        DIRECTORY
+            sandbox/examples
+        DESTINATION .
     )
 endif ()

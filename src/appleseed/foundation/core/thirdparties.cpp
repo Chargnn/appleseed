@@ -45,8 +45,8 @@
 #include <OpenEXR/IlmBaseConfig.h>
 #include "foundation/platform/_endexrheaders.h"
 
-// libpng headers.
-#include <png.h>
+// LZ4 headers.
+#include <lz4.h>
 
 // OpenColorIO headers.
 #include <OpenColorIO/OpenColorABI.h>
@@ -60,6 +60,11 @@
 #include "foundation/platform/_beginoiioheaders.h"
 #include <OpenImageIO/oiioversion.h>
 #include "foundation/platform/_endoiioheaders.h"
+
+// OptiX headers.
+#ifdef APPLESEED_WITH_GPU
+#include <optix.h>
+#endif
 
 // OSL headers.
 #include "foundation/platform/_beginoslheaders.h"
@@ -87,9 +92,7 @@ LibraryVersionArray ThirdParties::get_versions()
     static const char* BCDVersion = "v1.1";
     static const char* LibJpegTurboVersion = "1.3.1";
     static const char* LibTIFFVersion = "4.0.3";
-    static const char* LLVMVersion = "3.4.2";
-    static const char* LZ4Version = "revision 98 (July 1st, 2013)";
-    static const char* SeExprVersion = "commit db9610a24401fa7198c54c8768d0484175f54172";
+    static const char* SeExprVersion = "appleseedhq/SeExpr, qt5-appleseed branch, commit 8a3d1cd";
 
     LibraryVersionArray versions;
 
@@ -102,12 +105,21 @@ LibraryVersionArray ThirdParties::get_versions()
     versions.push_back(APIStringPair("Embree", RTC_VERSION_STRING));
 #endif
 
+#ifdef APPLESEED_WITH_GPU
+    unsigned int optix_version;
+    if (rtGetVersion(&optix_version) == RT_SUCCESS)
+    {
+        const unsigned int major = optix_version / 10000;
+        const unsigned int minor = (optix_version % 10000) / 100;
+        const unsigned int micro = optix_version % 100;
+        versions.push_back(APIStringPair("OptiX", format("{0}.{1}.{2}", major, minor, micro)));
+    }
+#endif
+
     versions.push_back(APIStringPair("IlmBase", ILMBASE_VERSION_STRING));
     versions.push_back(APIStringPair("libjpeg-turbo", LibJpegTurboVersion));
-    versions.push_back(APIStringPair("libpng", PNG_LIBPNG_VER_STRING));
     versions.push_back(APIStringPair("LibTIFF", LibTIFFVersion));
-    versions.push_back(APIStringPair("LLVM", LLVMVersion));
-    versions.push_back(APIStringPair("LZ4", LZ4Version));
+    versions.push_back(APIStringPair("LZ4", format("{0}.{1}.{2}", LZ4_VERSION_MAJOR, LZ4_VERSION_MINOR, LZ4_VERSION_RELEASE)));
     versions.push_back(APIStringPair("OpenColorIO", OCIO_VERSION));
     versions.push_back(APIStringPair("OpenEXR", OPENEXR_VERSION_STRING));
     versions.push_back(APIStringPair("OpenImageIO", OIIO_VERSION_STRING));

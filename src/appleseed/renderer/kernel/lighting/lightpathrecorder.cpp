@@ -66,6 +66,8 @@ APPLESEED_DEFINE_APIARRAY(LightPathArray);
 
 struct LightPathRecorder::Impl
 {
+    const Project&                      m_project;
+
     boost::mutex                        m_mutex;
     vector<unique_ptr<LightPathStream>> m_streams;
 
@@ -79,10 +81,15 @@ struct LightPathRecorder::Impl
     size_t                              m_render_width;
     size_t                              m_render_height;
     vector<IndexEntry>                  m_index;
+
+    explicit Impl(const Project& project)
+      : m_project(project)
+    {
+    }
 };
 
-LightPathRecorder::LightPathRecorder()
-  : impl(new Impl())
+LightPathRecorder::LightPathRecorder(const Project& project)
+  : impl(new Impl(project))
 {
 }
 
@@ -109,11 +116,19 @@ size_t LightPathRecorder::get_light_path_count() const
     return count;
 }
 
+size_t LightPathRecorder::get_vertex_count() const
+{
+    assert(impl->m_streams.size() == 1);
+    const LightPathStream* stream = impl->m_streams[0].get();
+
+    return stream->m_vertices.size();
+}
+
 LightPathStream* LightPathRecorder::create_stream()
 {
     boost::mutex::scoped_lock lock(impl->m_mutex);
 
-    auto stream = new LightPathStream();
+    auto stream = new LightPathStream(impl->m_project);
     impl->m_streams.push_back(unique_ptr<LightPathStream>(stream));
 
     return stream;
@@ -303,7 +318,7 @@ bool LightPathRecorder::write(const char* filename) const
         checked_write(file, Version);
 
         // Number of paths.
-        assert(light_path_count < 4294967295ULL);
+        assert(light_path_count < 4294967296ULL);
         checked_write(file, static_cast<uint32>(light_path_count));
 
         // On-disk variant of Impl::IndexEntry.

@@ -38,6 +38,7 @@
 // appleseed.foundation headers.
 #include "foundation/core/concepts/noncopyable.h"
 #include "foundation/platform/python.h"
+#include "foundation/utility/searchpaths.h"
 
 // Standard headers.
 #include <memory>
@@ -55,65 +56,88 @@ namespace
       : public NonCopyable
     {
       public:
-        bpy::object                     m_project_object;   // unreferenced but necessary
+        bpy::object                     m_project_object;       // unreferenced but necessary
+        SearchPaths                     m_resource_search_paths;
         std::unique_ptr<MasterRenderer> m_renderer;
 
         MasterRendererWrapper(
             bpy::object                 project_object,
             const ParamArray&           params,
-            IRendererController*        renderer_controller,
+            const bpy::list&            resource_search_paths,
             ITileCallbackFactory*       tile_callback_factory = nullptr)
           : m_project_object(project_object)
         {
+            init_search_paths(m_resource_search_paths, resource_search_paths);
+
             Project* project = bpy::extract<Project*>(project_object);
             m_renderer.reset(
                 new MasterRenderer(
                     *project,
                     params,
-                    renderer_controller,
+                    m_resource_search_paths,
                     tile_callback_factory));
         }
 
         MasterRendererWrapper(
             bpy::object                 project_object,
             const ParamArray&           params,
-            IRendererController*        renderer_controller,
+            const bpy::list&            resource_search_paths,
             ITileCallback*              tile_callback)
           : m_project_object(project_object)
         {
+            init_search_paths(m_resource_search_paths, resource_search_paths);
+
             Project* project = bpy::extract<Project*>(project_object);
             m_renderer.reset(
                 new MasterRenderer(
                     *project,
                     params,
-                    renderer_controller,
+                    m_resource_search_paths,
                     tile_callback));
+        }
+
+      private:
+        static void init_search_paths(
+            SearchPaths&                search_paths,
+            const bpy::list&            paths)
+        {
+            for (bpy::ssize_t i = 0, e = bpy::len(paths); i < e; ++i)
+            {
+                const bpy::extract<const char*> extractor(paths[i]);
+                if (extractor.check())
+                    search_paths.push_back_explicit_path(extractor());
+                else
+                {
+                    PyErr_SetString(PyExc_TypeError, "Incompatible type. Only strings accepted.");
+                    bpy::throw_error_already_set();
+                }
+            }
         }
     };
 
     std::shared_ptr<MasterRendererWrapper> create_master_renderer(
         bpy::object             project,
         const bpy::dict&        params,
-        IRendererController*    renderer_controller)
+        const bpy::list&        resource_search_paths)
     {
         return
             std::make_shared<MasterRendererWrapper>(
                 *project,
                 bpy_dict_to_param_array(params),
-                renderer_controller);
+                resource_search_paths);
     }
 
     std::shared_ptr<MasterRendererWrapper> create_master_renderer_with_tile_callback(
         bpy::object             project,
         const bpy::dict&        params,
-        IRendererController*    renderer_controller,
+        const bpy::list&        resource_search_paths,
         ITileCallback*          tile_callback)
     {
         return
             std::make_shared<MasterRendererWrapper>(
                 *project,
                 bpy_dict_to_param_array(params),
-                renderer_controller,
+                resource_search_paths,
                 tile_callback);
     }
 
@@ -129,13 +153,13 @@ namespace
         m->m_renderer->get_parameters() = bpy_dict_to_param_array(params);
     }
 
-    bool master_renderer_render(MasterRendererWrapper* m)
+    bool master_renderer_render(MasterRendererWrapper* m, IRendererController& renderer_controller)
     {
         // Unlock Python's global interpreter lock (GIL) while we do lengthy C++ computations.
         // The GIL is locked again when unlock goes out of scope.
         ScopedGILUnlock unlock;
 
-        const auto result = m->m_renderer->render();
+        const auto result = m->m_renderer->render(renderer_controller);
 
         return result.m_status == MasterRenderer::RenderingResult::Succeeded;
     }

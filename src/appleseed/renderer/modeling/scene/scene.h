@@ -78,7 +78,7 @@ class APPLESEED_DLLSYMBOL Scene
     void release() override;
 
     // Access the active camera.
-    // Return 0 if the camera does not exist.
+    // Return nullptr if the camera does not exist.
     Camera* get_active_camera() const;
 
     // Access the cameras.
@@ -88,7 +88,7 @@ class APPLESEED_DLLSYMBOL Scene
     void set_environment(foundation::auto_release_ptr<Environment> environment);
 
     // Access the environment.
-    // Return 0 if the environment does not exist.
+    // Return nullptr if the environment does not exist.
     Environment* get_environment() const;
 
     // Access the environment EDFs.
@@ -118,28 +118,22 @@ class APPLESEED_DLLSYMBOL Scene
         const Project&              project,
         foundation::IAbortSwitch*   abort_switch = nullptr);
 
-    // This method is called once before rendering.
-    // Returns true on success, false otherwise.
     bool on_render_begin(
         const Project&              project,
         const BaseGroup*            parent,
         OnRenderBeginRecorder&      recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr) override;
 
-    // This method is called once after rendering.
     void on_render_end(
         const Project&              project,
         const BaseGroup*            parent) override;
 
-    // This method is called once before rendering each frame.
-    // Returns true on success, false otherwise.
     bool on_frame_begin(
         const Project&              project,
         const BaseGroup*            parent,
         OnFrameBeginRecorder&       recorder,
         foundation::IAbortSwitch*   abort_switch = nullptr) override;
 
-    // This method is called once after rendering each frame (only if on_frame_begin() was called).
     void on_frame_end(
         const Project&              project,
         const BaseGroup*            parent) override;

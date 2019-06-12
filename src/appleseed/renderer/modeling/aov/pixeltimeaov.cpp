@@ -39,6 +39,8 @@
 // appleseed.foundation headers.
 #include "foundation/math/aabb.h"
 #include "foundation/image/color.h"
+#include "foundation/image/colormap.h"
+#include "foundation/image/colormapdata.h"
 #include "foundation/image/image.h"
 #include "foundation/image/tile.h"
 #include "foundation/platform/timers.h"
@@ -61,7 +63,7 @@ namespace
 {
 
     //
-    // PixelTime AOV accumulator.
+    // Pixel Time AOV accumulator.
     //
 
     class PixelTimeAOVAccumulator
@@ -85,43 +87,50 @@ namespace
 
         void on_sample_begin(const PixelContext& pixel_context) override
         {
-            m_stopwatch.clear();
             m_stopwatch.start();
         }
 
         void on_sample_end(const PixelContext& pixel_context) override
         {
-            m_stopwatch.measure();
-
             // Only collect samples inside the tile.
-            if (inside_tile(pixel_context.get_pixel_coords()))
+            if (m_cropped_tile_bbox.contains(pixel_context.get_pixel_coords()))
+            {
+                m_stopwatch.measure();
                 m_samples.push_back(m_stopwatch.get_seconds());
+            }
         }
 
         void on_pixel_begin(const Vector2i& pi) override
         {
+            UnfilteredAOVAccumulator::on_pixel_begin(pi);
+
             m_samples.clear();
         }
 
         void on_pixel_end(const Vector2i& pi) override
         {
-            if (m_samples.empty())
-                return;
+            if (m_cropped_tile_bbox.contains(pi) && !m_samples.empty())
+            {
+                // Compute the median of all the sample times we collected.
+                const size_t mid = m_samples.size() / 2;
 
-            // Compute the median of all the sample times we collected.
-            const size_t mid = m_samples.size() / 2;
+                nth_element(
+                    m_samples.begin(),
+                    m_samples.begin() + mid,
+                    m_samples.end());
 
-            nth_element(
-                m_samples.begin(),
-                m_samples.begin() + mid,
-                m_samples.end());
+                const double median = m_samples[mid];
 
-            const double median = m_samples[mid];
+                float* out =
+                    reinterpret_cast<float*>(
+                        m_tile->pixel(
+                            pi.x - m_tile_origin_x,
+                            pi.y - m_tile_origin_y));
 
-            float* p = reinterpret_cast<float*>(
-                m_tile->pixel(pi.x - m_tile_bbox.min.x, pi.y - m_tile_bbox.min.y));
+                *out += static_cast<float>(median) * m_samples.size();
+            }
 
-            *p += static_cast<float>(median) * m_samples.size();
+            UnfilteredAOVAccumulator::on_pixel_end(pi);
         }
 
       private:
@@ -131,7 +140,7 @@ namespace
 
 
     //
-    // PixelTime AOV.
+    // Pixel Time AOV.
     //
 
     const char* PixelTimeAOVModel = "pixel_time_aov";
@@ -157,58 +166,33 @@ namespace
 
         size_t get_channel_count() const override
         {
-            return 1;
+            return 3;
         }
 
         const char** get_channel_names() const override
         {
-            static const char* ChannelNames[] = {"PixelTime"};
+            static const char* ChannelNames[] = { "R", "G", "B" };
             return ChannelNames;
         }
 
         void clear_image() override
         {
-            m_image->clear(Color<float, 1>(0.0f));
+            m_image->clear(Color<float, 3>(0.0f));
         }
 
         void post_process_image(const Frame& frame) override
         {
             const AABB2u& crop_window = frame.get_crop_window();
 
-            // Find the maximum value.
-            float max_time = 0.0f;
+            ColorMap color_map;
+            color_map.set_palette_from_array(InfernoColorMapLinearRGB, countof(InfernoColorMapLinearRGB) / 3);
 
-            for (size_t j = crop_window.min.y; j <= crop_window.max.y; ++j)
-            {
-                for (size_t i = crop_window.min.x; i <= crop_window.max.x; ++i)
-                {
-                    float val;
-                    m_image->get_pixel(i, j, &val);
-                    max_time = max(val, max_time);
-                }
-            }
-
-            if (max_time == 0.0f)
-                return;
-
-            const float rcp_max_time = 1.0f / max_time;
-
-            // Normalize.
-            for (size_t j = crop_window.min.y; j <= crop_window.max.y; ++j)
-            {
-                for (size_t i = crop_window.min.x; i <= crop_window.max.x; ++i)
-                {
-                    float c;
-                    m_image->get_pixel(i, j, &c);
-
-                    c *= rcp_max_time;
-
-                    m_image->set_pixel(i, j, &c);
-                }
-            }
+            float min_time, max_time;
+            color_map.find_min_max_red_channel(*m_image, crop_window, min_time, max_time);
+            color_map.remap_red_channel(*m_image, crop_window, min_time, max_time);
         }
 
-      protected:
+      private:
         auto_release_ptr<AOVAccumulator> create_accumulator() const override
         {
             return auto_release_ptr<AOVAccumulator>(new PixelTimeAOVAccumulator(get_image()));
@@ -245,8 +229,7 @@ DictionaryArray PixelTimeAOVFactory::get_input_metadata() const
     return metadata;
 }
 
-auto_release_ptr<AOV> PixelTimeAOVFactory::create(
-    const ParamArray&   params) const
+auto_release_ptr<AOV> PixelTimeAOVFactory::create(const ParamArray& params) const
 {
     return auto_release_ptr<AOV>(new PixelTimeAOV(params));
 }

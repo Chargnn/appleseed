@@ -155,7 +155,7 @@ namespace
             const ShadingContext&       shading_context,
             const ShadingPoint&         shading_point,
             ShadingComponents&          radiance,               // output radiance, in W.sr^-1.m^-2
-            AOVComponents&              components) override
+            AOVComponents&              aov_components) override
         {
             if (m_params.m_view_photons)
             {
@@ -290,7 +290,7 @@ namespace
                     env_prob);
 
                 // Optionally clamp secondary rays contribution.
-                if (m_params.m_path_tracing_has_max_ray_intensity && vertex.m_path_length > 1)
+                if (m_params.m_path_tracing_has_max_ray_intensity && vertex.m_path_length > 1 && vertex.m_prev_mode != ScatteringMode::Specular)
                     clamp_contribution(env_radiance, m_params.m_path_tracing_max_ray_intensity);
 
                 // Update the path radiance.
@@ -328,7 +328,7 @@ namespace
                 }
 
                 // Optionally clamp secondary rays contribution.
-                if (m_params.m_path_tracing_has_max_ray_intensity && vertex.m_path_length > 1)
+                if (m_params.m_path_tracing_has_max_ray_intensity && vertex.m_path_length > 1 && vertex.m_prev_mode != ScatteringMode::Specular)
                     clamp_contribution(vertex_radiance, m_params.m_path_tracing_max_ray_intensity);
 
                 // Update the path radiance.
@@ -336,7 +336,7 @@ namespace
                 m_path_radiance.add(vertex.m_path_length, vertex.m_aov_mode, vertex_radiance);
             }
 
-            void on_scatter(const PathVertex& vertex)
+            void on_scatter(PathVertex& vertex)
             {
             }
 
@@ -660,37 +660,17 @@ namespace
 // SPPMLightingEngineFactory class implementation.
 //
 
-SPPMLightingEngineFactory::SPPMLightingEngineFactory(
-    const SPPMPassCallback&         pass_callback,
-    const ForwardLightSampler&      forward_light_sampler,
-    const BackwardLightSampler&     backward_light_sampler,
-    const SPPMParameters&           params)
-  : m_pass_callback(pass_callback)
-  , m_forward_light_sampler(forward_light_sampler)
-  , m_backward_light_sampler(backward_light_sampler)
-  , m_params(params)
-{
-}
-
-void SPPMLightingEngineFactory::release()
-{
-    delete this;
-}
-
-ILightingEngine* SPPMLightingEngineFactory::create()
-{
-    return
-        new SPPMLightingEngine(
-            m_pass_callback,
-            m_forward_light_sampler,
-            m_backward_light_sampler,
-            m_params);
-}
-
 Dictionary SPPMLightingEngineFactory::get_params_metadata()
 {
     Dictionary metadata;
-    add_common_params_metadata(metadata, false);
+
+    metadata.dictionaries().insert(
+        "enable_ibl",
+        Dictionary()
+            .insert("type", "bool")
+            .insert("default", "on")
+            .insert("label", "Enable IBL")
+            .insert("help", "Enable image-based lighting"));
 
     metadata.dictionaries().insert(
         "enable_caustics",
@@ -838,6 +818,33 @@ Dictionary SPPMLightingEngineFactory::get_params_metadata()
             .insert("help", "Evolution rate of photon gathering radius"));
 
     return metadata;
+}
+
+SPPMLightingEngineFactory::SPPMLightingEngineFactory(
+    const SPPMPassCallback&         pass_callback,
+    const ForwardLightSampler&      forward_light_sampler,
+    const BackwardLightSampler&     backward_light_sampler,
+    const SPPMParameters&           params)
+  : m_pass_callback(pass_callback)
+  , m_forward_light_sampler(forward_light_sampler)
+  , m_backward_light_sampler(backward_light_sampler)
+  , m_params(params)
+{
+}
+
+void SPPMLightingEngineFactory::release()
+{
+    delete this;
+}
+
+ILightingEngine* SPPMLightingEngineFactory::create()
+{
+    return
+        new SPPMLightingEngine(
+            m_pass_callback,
+            m_forward_light_sampler,
+            m_backward_light_sampler,
+            m_params);
 }
 
 }   // namespace renderer

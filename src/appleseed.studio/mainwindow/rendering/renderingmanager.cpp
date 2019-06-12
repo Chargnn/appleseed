@@ -32,16 +32,19 @@
 
 // appleseed.studio headers.
 #include "mainwindow/rendering/cameracontroller.h"
+#include "mainwindow/rendering/qttilecallback.h"
 #include "mainwindow/rendering/rendertab.h"
 #include "mainwindow/rendering/renderwidget.h"
 #include "mainwindow/statusbar.h"
 
 // appleseed.shared headers.
 #include "application/application.h"
+#include "application/progresstilecallback.h"
 
 // appleseed.renderer headers.
 #include "renderer/api/camera.h"
 #include "renderer/api/frame.h"
+#include "renderer/api/log.h"
 #include "renderer/api/project.h"
 #include "renderer/api/scene.h"
 #include "renderer/api/utility.h"
@@ -86,8 +89,11 @@ namespace
 
       public:
         // Constructor.
-        explicit MasterRendererThread(MasterRenderer* master_renderer)
+        MasterRendererThread(
+            MasterRenderer&         master_renderer,
+            IRendererController&    renderer_controller)
           : m_master_renderer(master_renderer)
+          , m_renderer_controller(renderer_controller)
         {
         }
 
@@ -95,7 +101,8 @@ namespace
         void signal_rendering_failed();
 
       private:
-        MasterRenderer* m_master_renderer;
+        MasterRenderer&             m_master_renderer;
+        IRendererController&        m_renderer_controller;
 
         // The entry point for the thread.
         void run() override
@@ -105,7 +112,7 @@ namespace
             set_current_thread_name("master_renderer");
 
             const MasterRenderer::RenderingResult rendering_result =
-                m_master_renderer->render();
+                m_master_renderer.render(m_renderer_controller);
 
             if (rendering_result.m_status != MasterRenderer::RenderingResult::Succeeded)
                 emit signal_rendering_failed();
@@ -120,6 +127,8 @@ RenderingManager::RenderingManager(StatusBar& status_bar)
   , m_project(nullptr)
   , m_render_tab(nullptr)
 {
+    Application::initialize_resource_search_paths(m_resource_search_paths);
+
     //
     // The connections below are using the Qt::BlockingQueuedConnection connection type.
     //
@@ -196,19 +205,31 @@ void RenderingManager::start_rendering(
 
     m_render_tab->get_render_widget()->start_render();
 
-    m_tile_callback_factory.reset(
+    TileCallbackCollectionFactory* tile_callback_collection_factory = 
+        new TileCallbackCollectionFactory();
+
+    tile_callback_collection_factory->insert(
         new QtTileCallbackFactory(
             m_render_tab->get_render_widget()));
+
+    tile_callback_collection_factory->insert(
+        new ProgressTileCallbackFactory(
+            global_logger(),
+            m_params.get_optional<size_t>("passes", 1)));
+
+    m_tile_callback_factory.reset(tile_callback_collection_factory);
 
     m_master_renderer.reset(
         new MasterRenderer(
             *m_project,
             m_params,
-            &m_renderer_controller,
+            m_resource_search_paths,
             m_tile_callback_factory.get()));
 
     m_master_renderer_thread.reset(
-        new MasterRendererThread(m_master_renderer.get()));
+        new MasterRendererThread(
+            *m_master_renderer,
+            m_renderer_controller));
 
     connect(
         m_master_renderer_thread.get(), SIGNAL(signal_rendering_failed()),
@@ -360,6 +381,20 @@ void RenderingManager::print_average_luminance()
         pretty_scalar(average_luminance, 6).c_str());
 }
 
+void RenderingManager::print_rms_deviation()
+{
+    if (!m_project->get_frame()->has_valid_ref_image())
+        return;
+
+    const double rmsd = compute_rms_deviation(
+        m_project->get_frame()->image(),
+        *m_project->get_frame()->ref_image());
+
+    RENDERER_LOG_INFO(
+        "final rms deviation is %s.",
+        pretty_scalar(rmsd, 6).c_str());
+}
+
 void RenderingManager::archive_frame_to_disk()
 {
     RENDERER_LOG_INFO("archiving frame to disk...");
@@ -435,6 +470,8 @@ void RenderingManager::slot_rendering_end()
 
     if (m_params.get_optional<bool>("print_final_average_luminance", false))
         print_average_luminance();
+
+    print_rms_deviation();
 
     if (m_params.get_optional<bool>("autosave", true))
         archive_frame_to_disk();

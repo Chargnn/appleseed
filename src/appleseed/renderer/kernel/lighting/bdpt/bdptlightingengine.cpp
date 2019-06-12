@@ -154,7 +154,7 @@ namespace
             const ShadingContext&       shading_context,
             const ShadingPoint&         shading_point,
             ShadingComponents&          radiance,               // output radiance, in W.sr^-1.m^-2
-            AOVComponents&              components) override
+            AOVComponents&              aov_components) override
         {
             /// TODO:: use arena to alloc BDPTVertices instead
             BDPTVertex* camera_vertices = new BDPTVertex[m_num_max_vertices - 1];
@@ -468,8 +468,8 @@ namespace
                 light_sample);
 
             return
-                light_sample.m_triangle != nullptr
-                    ? trace_emitting_triangle(
+                light_sample.m_shape != nullptr
+                    ? trace_emitting_shape(
                         sampling_context,
                         shading_context,
                         light_sample,
@@ -480,7 +480,7 @@ namespace
                         light_sample);
         }
 
-        size_t trace_emitting_triangle(
+        size_t trace_emitting_shape(
             SamplingContext&            sampling_context,
             const ShadingContext&       shading_context,
             LightSample&                light_sample,
@@ -492,7 +492,7 @@ namespace
                     light_sample.m_geometric_normal,
                     light_sample.m_shading_normal);
 
-            const Material* material = light_sample.m_triangle->m_material;
+            const Material* material = light_sample.m_shape->get_material();
             const Material::RenderData& material_data = material->get_render_data();
 
             // Build a shading point on the light source.
@@ -711,7 +711,7 @@ namespace
                 (*m_num_vertices)++;
             }
 
-            void on_scatter(const PathVertex& vertex)
+            void on_scatter(PathVertex& vertex)
             {
             }
         };
@@ -744,6 +744,55 @@ namespace
 // BDPTLightingEngineFactory class implementation.
 //
 
+Dictionary BDPTLightingEngineFactory::get_params_metadata()
+{
+    Dictionary metadata;
+
+    metadata.dictionaries().insert(
+        "enable_ibl",
+        Dictionary()
+            .insert("type", "bool")
+            .insert("default", "on")
+            .insert("label", "Enable IBL")
+            .insert("help", "Enable image-based lighting"));
+
+    metadata.dictionaries().insert(
+        "max_bounces",
+        Dictionary()
+            .insert("type", "int")
+            .insert("default", "8")
+            .insert("unlimited", "true")
+            .insert("min", "0")
+            .insert("label", "Max Bounces")
+            .insert("help", "Maximum number of bounces"));
+
+    metadata.dictionaries().insert(
+        "dl_light_samples",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "1.0")
+            .insert("label", "Light Samples")
+            .insert("help", "Number of samples used to estimate direct lighting"));
+
+    metadata.dictionaries().insert(
+        "dl_low_light_threshold",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "0.0")
+            .insert("label", "Low Light Threshold")
+            .insert("help", "Light contribution threshold to disable shadow rays"));
+
+    metadata.dictionaries().insert(
+        "ibl_env_samples",
+        Dictionary()
+            .insert("type", "float")
+            .insert("default", "1.0")
+            .insert("label", "IBL Samples")
+            .insert("help", "Number of samples used to estimate environment lighting"));
+
+    return metadata;
+}
+
 BDPTLightingEngineFactory::BDPTLightingEngineFactory(
     const Project&              project,
     const ForwardLightSampler&  light_sampler,
@@ -766,24 +815,6 @@ ILightingEngine* BDPTLightingEngineFactory::create()
             m_project,
             m_light_sampler,
             m_params);
-}
-
-Dictionary BDPTLightingEngineFactory::get_params_metadata()
-{
-    Dictionary metadata;
-    add_common_params_metadata(metadata, true);
-
-    metadata.dictionaries().insert(
-        "max_bounces",
-        Dictionary()
-            .insert("type", "int")
-            .insert("default", "8")
-            .insert("unlimited", "true")
-            .insert("min", "0")
-            .insert("label", "Max Bounces")
-            .insert("help", "Maximum number of bounces"));
-
-    return metadata;
 }
 
 }   // namespace renderer

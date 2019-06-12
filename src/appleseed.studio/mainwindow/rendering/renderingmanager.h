@@ -31,7 +31,6 @@
 
 // appleseed.studio headers.
 #include "mainwindow/rendering/qtrenderercontroller.h"
-#include "mainwindow/rendering/qttilecallback.h"
 #include "mainwindow/rendering/renderingtimer.h"
 
 // appleseed.renderer headers.
@@ -44,6 +43,7 @@
 #include "foundation/platform/thread.h"
 #include "foundation/utility/autoreleaseptr.h"
 #include "foundation/utility/job/abortswitch.h"
+#include "foundation/utility/searchpaths.h"
 
 // Qt headers.
 #include <QObject>
@@ -151,7 +151,6 @@ class RenderingManager
     void clear_sticky_actions();
 
   signals:
-    void signal_camera_changed();
     void signal_rendering_end();
 
   public slots:
@@ -165,10 +164,12 @@ class RenderingManager
 
     renderer::Project*                          m_project;
     renderer::ParamArray                        m_params;
+    foundation::SearchPaths                     m_resource_search_paths;
     RenderingMode                               m_rendering_mode;
     RenderTab*                                  m_render_tab;
 
-    std::unique_ptr<QtTileCallbackFactory>      m_tile_callback_factory;
+    std::unique_ptr<renderer::TileCallbackCollectionFactory>      
+                                                m_tile_callback_factory;
     std::unique_ptr<renderer::MasterRenderer>   m_master_renderer;
     std::unique_ptr<QThread>                    m_master_renderer_thread;
 
@@ -184,6 +185,7 @@ class RenderingManager
 
     void print_final_rendering_time();
     void print_average_luminance();
+    void print_rms_deviation();
     void archive_frame_to_disk();
 
     void run_scheduled_actions();

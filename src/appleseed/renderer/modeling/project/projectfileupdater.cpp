@@ -91,6 +91,7 @@
 // Standard headers.
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -1047,6 +1048,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 10 to revision 11.
     //
@@ -1089,6 +1091,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 11 to revision 12.
     //
@@ -1130,6 +1133,7 @@ namespace
             move_if_exist(bssrdf, "mfp_multiplier", "dmfp_multiplier");
         }
     };
+
 
     //
     // Update from revision 12 to revision 13.
@@ -1174,6 +1178,7 @@ namespace
             }
         }
     };
+
 
     //
     // Update from revision 13 to revision 14.
@@ -1270,6 +1275,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 14 to revision 15.
     //
@@ -1340,6 +1346,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 15 to revision 16.
     //
@@ -1392,6 +1399,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 16 to revision 17.
     //
@@ -1434,6 +1442,7 @@ namespace
                 params.dictionaries().remove("drt");
         }
     };
+
 
     //
     // Update from revision 17 to revision 18.
@@ -1498,6 +1507,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 18 to revision 19.
     //
@@ -1528,6 +1538,7 @@ namespace
             params.remove_path("premultiplied_alpha");
         }
     };
+
 
     //
     // Update from revision 19 to revision 20.
@@ -1575,6 +1586,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 20 to revision 21.
     //
@@ -1621,6 +1633,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 21 to revision 22.
     //
@@ -1656,6 +1669,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 22 to revision 23.
     //
@@ -1688,6 +1702,7 @@ namespace
             }
         }
     };
+
 
     //
     // Update from revision 23 to revision 24.
@@ -1740,6 +1755,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 24 to revision 25.
     //
@@ -1767,6 +1783,7 @@ namespace
             }
         }
     };
+
 
     //
     // Update from revision 25 to revision 26.
@@ -1810,6 +1827,7 @@ namespace
             params.remove_path("render_stamp_format");
         }
     };
+
 
     //
     // Update from revision 26 to revision 27.
@@ -1881,6 +1899,7 @@ namespace
         }
     };
 
+
     //
     // Update from revision 27 to revision 28.
     //
@@ -1915,6 +1934,7 @@ namespace
             assembly.get_parameters().remove_path("flushable");
         }
     };
+
 
     //
     // Update from revision 28 to revision 29.
@@ -1951,6 +1971,199 @@ namespace
                     }
                 }
             }
+        }
+    };
+
+
+    //
+    // Update from revision 29 to revision 30.
+    //
+
+    class UpdateFromRevision_29
+      : public Updater
+    {
+      public:
+        explicit UpdateFromRevision_29(Project& project)
+          : Updater(project, 29)
+        {
+        }
+
+        void update() override
+        {
+            remove_adaptive_pixel_renderer_settings();
+            remove_decorrelate_pixels_setting();
+
+            if (m_project.get_frame())
+                update_frame_filter(*m_project.get_frame());
+        }
+
+      private:
+        static void update_frame_filter(Frame& frame)
+        {
+            const char* DefaultFilterName = "blackman-harris";
+
+            ParamArray& params = frame.get_parameters();
+            const string filter_name = params.get_optional<string>("filter", DefaultFilterName);
+
+            const bool update_filter =
+                filter_name == "mitchell" ||
+                filter_name == "bspline" ||
+                filter_name == "catmull" ||
+                filter_name == "lanczos";
+
+            if (update_filter)
+            {
+                RENDERER_LOG_WARNING(
+                    "with the introduction of filter importance sampling, some reconstruction filters were removed; "
+                    "migrating this project to use the default reconstruction filter instead.");
+
+                params.insert_path("filter", DefaultFilterName);
+            }
+        }
+
+        void remove_decorrelate_pixels_setting()
+        {
+            for (Configuration& config : m_project.configurations())
+            {
+                Dictionary& root = config.get_parameters();
+
+                if (root.dictionaries().exist("uniform_pixel_renderer"))
+                {
+                    Dictionary& d = root.dictionary("uniform_pixel_renderer");
+
+                    if (d.strings().exist("decorrelate_pixels"))
+                    {
+                        if (d.strings().get<bool>("decorrelate_pixels") == false)
+                        {
+                            RENDERER_LOG_WARNING(
+                                "with the introduction of filter importance sampling, the option to disable pixel decorrelation was removed; "
+                                "migrating this project to use pixel decorrelation instead.");
+                        }
+
+                        d.strings().remove("decorrelate_pixels");
+                    }
+                }
+            }
+        }
+
+        void remove_adaptive_pixel_renderer_settings()
+        {
+            for (Configuration& config : m_project.configurations())
+            {
+                Dictionary& root = config.get_parameters();
+
+                if (root.dictionaries().exist("adaptive_pixel_renderer"))
+                    root.dictionaries().remove("adaptive_pixel_renderer");
+
+                if (root.strings().exist("pixel_renderer"))
+                {
+                    const char* pixel_renderer = root.strings().get("pixel_renderer");
+                    if (strcmp(pixel_renderer, "adaptive") == 0)
+                    {
+                        RENDERER_LOG_WARNING(
+                            "with the introduction of a new adaptive tile renderer, the adaptive pixel renderer was removed; "
+                            "migrating this project to use the uniform pixel renderer instead.");
+
+                        root.strings().set("pixel_renderer", "uniform");
+                    }
+                }
+            }
+        }
+    };
+
+
+    //
+    // Update from revision 30 to revision 31.
+    //
+
+    class UpdateFromRevision_30
+      : public Updater
+    {
+      public:
+        explicit UpdateFromRevision_30(Project& project)
+          : Updater(project, 30)
+        {
+        }
+
+        void update() override
+        {
+            replace_max_samples_interactive_renderer_setting();
+
+            if (Scene* scene = m_project.get_scene())
+                update_assemblies(scene->assemblies());
+        }
+
+      private:
+        void replace_max_samples_interactive_renderer_setting()
+        {
+            for (Configuration& config : m_project.configurations())
+            {
+                Dictionary& root = config.get_parameters();
+
+                if (root.dictionaries().exist("progressive_frame_renderer"))
+                {
+                    Dictionary& pfr = root.dictionaries().get("progressive_frame_renderer");
+
+                    if (pfr.strings().exist("max_samples"))
+                    {
+                        const uint64 max_samples = pfr.strings().get<uint64>("max_samples");
+                        pfr.strings().remove("max_samples");
+
+                        Frame* frame = m_project.get_frame();
+                        if (frame)
+                        {
+                            // If max samples was previously set then preserve the nearest max average spp count.
+                            pfr.strings().insert(
+                                "max_average_spp", static_cast<uint64>(ceil(max_samples / frame->get_crop_window().volume())));
+                        }
+                    }
+                }
+            }
+        }
+
+        static void update_assemblies(const AssemblyContainer& assemblies)
+        {
+            for (const auto& assembly : assemblies)
+            {
+                update_bsdfs(assembly.bsdfs());
+                update_assemblies(assembly.assemblies());
+            }
+        }
+
+        static void update_bsdfs(BSDFContainer& bsdfs)
+        {
+            for (auto& bsdf : bsdfs)
+            {
+                if (strcmp(bsdf.get_model(), "glass_bsdf") == 0)
+                    update_microfacet_params(bsdf);
+                else if (strcmp(bsdf.get_model(), "metal_brdf") == 0)
+                    update_microfacet_params(bsdf);
+                else if (strcmp(bsdf.get_model(), "glossy_brdf") == 0)
+                    update_microfacet_params(bsdf);
+                else if (strcmp(bsdf.get_model(), "plastic_brdf") == 0)
+                    update_microfacet_params(bsdf);
+            }
+        }
+
+        static void update_microfacet_params(BSDF& bsdf)
+        {
+            ParamArray& params = bsdf.get_parameters();
+
+            if (params.strings().exist("mdf"))
+            {
+                const string mdf = params.strings().get<string>("mdf");
+                params.strings().remove("mdf");
+                if (mdf != "ggx")
+                {
+                    RENDERER_LOG_WARNING(
+                        "the %s microfacet distribution used by BSDF \"%s\" was removed; "
+                        "the GGX distribution will be used instead.",
+                        mdf.c_str(),
+                        bsdf.get_name());
+                }
+            }
+
+            params.strings().remove("highlight_falloff");
         }
     };
 }
@@ -2014,6 +2227,8 @@ void ProjectFileUpdater::update(
       CASE_UPDATE_FROM_REVISION(26);
       CASE_UPDATE_FROM_REVISION(27);
       CASE_UPDATE_FROM_REVISION(28);
+      CASE_UPDATE_FROM_REVISION(29);
+      CASE_UPDATE_FROM_REVISION(30);
 
       case ProjectFormatRevision:
         // Project is up-to-date.

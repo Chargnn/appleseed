@@ -82,17 +82,25 @@ namespace
             const Vector2i& pi = pixel_context.get_pixel_coords();
 
             // Ignore samples outside the tile.
-            if (!inside_tile(pi))
+            if (!m_cropped_tile_bbox.contains(pi))
                 return;
 
-            float* p = reinterpret_cast<float*>(
-                get_tile().pixel(pi.x - m_tile_bbox.min.x, pi.y - m_tile_bbox.min.y));
+            float* out =
+                reinterpret_cast<float*>(
+                    m_tile->pixel(
+                        pi.x - m_tile_origin_x,
+                        pi.y - m_tile_origin_y));
 
-            const float depth = shading_point.hit_surface()
-                ? static_cast<float>(shading_point.get_distance())
-                : numeric_limits<float>::max();
-
-            *p = depth;
+            if (shading_point.hit_surface())
+            {
+                shading_result.m_aovs[0].a = 1.0f;
+                *out = static_cast<float>(shading_point.get_distance());
+            }
+            else
+            {
+                shading_result.m_aovs[0].a = 0.0f;
+                *out = 0.0f;
+            }
         }
     };
 
@@ -124,21 +132,21 @@ namespace
 
         size_t get_channel_count() const override
         {
-            return 1;
+            return 2;
         }
 
         const char** get_channel_names() const override
         {
-            static const char* ChannelNames[] = {"Z"};
+            static const char* ChannelNames[] = { "Z", "A" };
             return ChannelNames;
         }
 
         void clear_image() override
         {
-            m_image->clear(Color<float, 1>(numeric_limits<float>::max()));
+            m_image->clear(Color<float, 2>(0.0f));
         }
 
-      protected:
+      private:
         auto_release_ptr<AOVAccumulator> create_accumulator() const override
         {
             return auto_release_ptr<AOVAccumulator>(
@@ -177,8 +185,7 @@ DictionaryArray DepthAOVFactory::get_input_metadata() const
     return metadata;
 }
 
-auto_release_ptr<AOV> DepthAOVFactory::create(
-    const ParamArray&   params) const
+auto_release_ptr<AOV> DepthAOVFactory::create(const ParamArray& params) const
 {
     return auto_release_ptr<AOV>(new DepthAOV(params));
 }
